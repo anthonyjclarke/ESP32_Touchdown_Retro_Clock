@@ -85,6 +85,7 @@
 
 #include "config.h"
 #include "timezones.h"
+#include "TetrisClock.h"
 
 // Sensor libraries (only one will be used based on config.h)
 #ifdef USE_BME280
@@ -189,6 +190,11 @@ struct AppConfig {
   // Morphing animation speed (multiplier: 1=fast, 10=very slow)
   uint8_t morphSpeed = 1;      // 1-10, controls digit morphing duration
 
+  // Clock display mode settings
+  uint8_t clockMode = DEFAULT_CLOCK_MODE;           // 0=7-seg, 1=Tetris, etc.
+  bool autoRotate = DEFAULT_AUTO_ROTATE;            // Auto-rotate through modes
+  uint8_t rotateInterval = DEFAULT_ROTATE_INTERVAL; // Minutes between rotations
+
   // Sensor settings
   bool useFahrenheit = false;   // false=Celsius, true=Fahrenheit
 };
@@ -216,6 +222,15 @@ static uint8_t appliedPitch = 0;
 // Sprite settings for flicker-free debug renderer
 static int fbPitch = 2;      // logical LED -> TFT pixels (computed from TFT size + config)
 static bool useSprite = false;
+
+// Clock mode management
+TetrisClock* tetrisClock = nullptr;  // Tetris clock instance (created in setup)
+unsigned long lastModeRotation = 0;  // Last time clock mode was rotated
+const uint8_t TOTAL_CLOCK_MODES = 2; // 0=7-seg, 1=Tetris
+bool clockColon = true;              // Colon blink state
+unsigned long lastColonToggle = 0;   // Last colon toggle time
+uint8_t fadeLevel = 255;             // Current fade level (0-255) for mode transitions
+bool inTransition = false;           // True during mode transition fade
 // =========================
 // Status LED (not available on ESP32 Touchdown)
 // Consider using GPIO breakout pins if status indication is needed
@@ -699,6 +714,9 @@ static void loadConfig() {
   cfg.flipDisplay = prefs.getBool("flip", false);
   cfg.morphSpeed = (uint8_t)prefs.getUChar("morph", 1);  // Default: 1x speed (20 frames)
   cfg.useFahrenheit = prefs.getBool("useFahr", false);
+  cfg.clockMode = (uint8_t)prefs.getUChar("clockMode", DEFAULT_CLOCK_MODE);
+  cfg.autoRotate = prefs.getBool("autoRotate", DEFAULT_AUTO_ROTATE);
+  cfg.rotateInterval = (uint8_t)prefs.getUChar("rotateInt", DEFAULT_ROTATE_INTERVAL);
   debugLevel = (uint8_t)prefs.getUChar("dbglvl", DEBUG_LEVEL);
 
   prefs.end();
@@ -730,6 +748,9 @@ static void saveConfig() {
   prefs.putBool("flip", cfg.flipDisplay);
   prefs.putUChar("morph", cfg.morphSpeed);
   prefs.putBool("useFahr", cfg.useFahrenheit);
+  prefs.putUChar("clockMode", cfg.clockMode);
+  prefs.putBool("autoRotate", cfg.autoRotate);
+  prefs.putUChar("rotateInt", cfg.rotateInterval);
   prefs.putUChar("dbglvl", debugLevel);
   prefs.end();
   DBG_OK("Config saved.");

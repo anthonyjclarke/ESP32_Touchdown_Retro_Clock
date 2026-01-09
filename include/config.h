@@ -41,6 +41,16 @@
 #define DEFAULT_NTP "pool.ntp.org"
 #define DEFAULT_24H true
 
+// ===== CLOCK DISPLAY MODES =====
+// Available clock display modes
+#define CLOCK_MODE_7SEG    0    // Classic 7-segment LED display (default)
+#define CLOCK_MODE_TETRIS  1    // Tetris animation clock
+// Future modes: CLOCK_MODE_ANALOG, CLOCK_MODE_BINARY, CLOCK_MODE_WORD, etc.
+
+#define DEFAULT_CLOCK_MODE CLOCK_MODE_7SEG  // Default clock mode
+#define DEFAULT_AUTO_ROTATE false           // Auto-rotate through clock modes
+#define DEFAULT_ROTATE_INTERVAL 5           // Minutes between mode changes (when auto-rotate enabled)
+
 // ===== SENSOR CONFIGURATION =====
 // Choose your sensor type by uncommenting ONE of the following:
 // #define USE_BME280        // BME280: Temperature, Humidity, Pressure sensor
