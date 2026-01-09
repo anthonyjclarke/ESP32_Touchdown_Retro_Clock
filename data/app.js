@@ -187,6 +187,11 @@ async function setControls(state) {
     $("morphSpeedVal").textContent = (state.morphSpeed || 1) + "x";
   }
 
+  // Clock mode settings
+  if (document.activeElement !== $("clockMode")) $("clockMode").value = String(state.clockMode || 0);
+  if (document.activeElement !== $("autoRotate")) $("autoRotate").value = String(state.autoRotate || false);
+  if (!dirtyInputs.has("rotateInterval")) $("rotateInterval").value = state.rotateInterval || 5;
+
 }
 
 async function fetchMirror() {
@@ -213,12 +218,16 @@ async function saveConfig() {
   const morphSpeed = parseInt($("morphSpeed").value, 10) || 1;
   const debugLevel = parseInt($("debugLevel").value, 10);
 
+  const clockMode = parseInt($("clockMode").value, 10) || 0;
+  const autoRotate = $("autoRotate").value === "true";
+  const rotateInterval = parseInt($("rotateInterval").value, 10) || 5;
+
   const { r, g, b } = rgbFromHex($("col").value);
   const ledColor = (r<<16) | (g<<8) | b;
 
   const ledDiameter = Number.isFinite(ledDiameterRaw) ? ledDiameterRaw : state.ledDiameter;
   const ledGap = Number.isFinite(ledGapRaw) ? ledGapRaw : state.ledGap;
-  const payload = { tz, ntp, use24h, dateFormat, useFahrenheit, ledDiameter, ledGap, ledColor, brightness, morphSpeed, debugLevel };
+  const payload = { tz, ntp, use24h, dateFormat, useFahrenheit, ledDiameter, ledGap, ledColor, brightness, morphSpeed, debugLevel, clockMode, autoRotate, rotateInterval };
 
   const res = await fetch("/api/config", {
     method: "POST",
@@ -401,7 +410,7 @@ function renderMirror(buf, state) {
 }
 
 // Auto-apply on any config field change (instant feedback)
-["tz", "ntp", "use24h", "dateFormat", "useFahrenheit", "ledd", "ledg", "col", "bl", "morphSpeed", "debugLevel"].forEach((id) => {
+["tz", "ntp", "use24h", "dateFormat", "useFahrenheit", "ledd", "ledg", "col", "bl", "morphSpeed", "debugLevel", "clockMode", "autoRotate", "rotateInterval"].forEach((id) => {
   const el = $(id);
 
   // Immediate save on change for dropdowns and text inputs

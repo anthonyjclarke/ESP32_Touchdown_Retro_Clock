@@ -231,6 +231,10 @@ bool clockColon = true;              // Colon blink state
 unsigned long lastColonToggle = 0;   // Last colon toggle time
 uint8_t fadeLevel = 255;             // Current fade level (0-255) for mode transitions
 bool inTransition = false;           // True during mode transition fade
+
+// Forward declarations
+static void switchClockMode(uint8_t newMode);
+
 // =========================
 // Status LED (not available on ESP32 Touchdown)
 // Consider using GPIO breakout pins if status indication is needed
@@ -1088,6 +1092,9 @@ static void handleGetState() {
   doc["brightness"] = cfg.brightness;
   doc["morphSpeed"] = cfg.morphSpeed;
   doc["flipDisplay"] = cfg.flipDisplay;
+  doc["clockMode"] = cfg.clockMode;
+  doc["autoRotate"] = cfg.autoRotate;
+  doc["rotateInterval"] = cfg.rotateInterval;
 
   // System diagnostics
   uint32_t uptime = millis() / 1000;  // seconds
@@ -1292,6 +1299,42 @@ static void handlePostConfig() {
       DBG_INFO("  [%s] Temperature unit changed: %s -> %s\n", clientIP.c_str(),
                oldUseFahrenheit ? "°F" : "°C",
                cfg.useFahrenheit ? "°F" : "°C");
+    }
+  }
+
+  // Clock Mode
+  if (!doc["clockMode"].isNull()) {
+    uint8_t oldClockMode = cfg.clockMode;
+    uint8_t newClockMode = (uint8_t)constrain(doc["clockMode"].as<int>(), 0, TOTAL_CLOCK_MODES - 1);
+    if (oldClockMode != newClockMode) {
+      const char* modes[] = {"7-Segment", "Tetris"};
+      DBG_INFO("  [%s] Clock mode changed: %s -> %s\n", clientIP.c_str(),
+               modes[oldClockMode], modes[newClockMode]);
+      switchClockMode(newClockMode);  // Use fade transition
+    }
+  }
+
+  // Auto-Rotate
+  if (!doc["autoRotate"].isNull()) {
+    bool oldAutoRotate = cfg.autoRotate;
+    cfg.autoRotate = doc["autoRotate"].as<bool>();
+    if (oldAutoRotate != cfg.autoRotate) {
+      DBG_INFO("  [%s] Auto-rotate changed: %s -> %s\n", clientIP.c_str(),
+               oldAutoRotate ? "ON" : "OFF",
+               cfg.autoRotate ? "ON" : "OFF");
+      if (cfg.autoRotate) {
+        lastModeRotation = millis();  // Reset timer when enabling
+      }
+    }
+  }
+
+  // Rotation Interval
+  if (!doc["rotateInterval"].isNull()) {
+    uint8_t oldRotateInterval = cfg.rotateInterval;
+    cfg.rotateInterval = (uint8_t)constrain(doc["rotateInterval"].as<int>(), 1, 60);
+    if (oldRotateInterval != cfg.rotateInterval) {
+      DBG_INFO("  [%s] Rotation interval changed: %d -> %d min\n", clientIP.c_str(),
+               oldRotateInterval, cfg.rotateInterval);
     }
   }
 

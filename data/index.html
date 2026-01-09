@@ -77,6 +77,28 @@
           </select>
         </label>
 
+        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">Clock Display Mode</h3>
+
+        <label>Display Style
+          <select id="clockMode">
+            <option value="0">7-Segment (Classic)</option>
+            <option value="1">Tetris Animation</option>
+          </select>
+        </label>
+
+        <label>Auto-Rotate Modes
+          <select id="autoRotate">
+            <option value="false">Manual Selection</option>
+            <option value="true">Auto-Rotate</option>
+          </select>
+        </label>
+
+        <label>Rotation Interval (min)
+          <input id="rotateInterval" type="number" min="1" max="60" value="5">
+        </label>
+
+        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">LED Appearance</h3>
+
         <label>LED diameter (px)
           <input id="ledd" type="number" min="1" max="10">
         </label>
