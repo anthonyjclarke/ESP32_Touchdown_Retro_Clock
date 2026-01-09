@@ -1701,6 +1701,151 @@ static void drawFrame() {
   if (morphStep < effectiveMorphSteps) morphStep++;
 }
 
+/**
+ * Tetris Clock Mode - Renders time using falling Tetris block animations
+ * Uses TetrisMatrixDraw library to create animated digit transitions
+ * Respects 12/24 hour format and shows AM/PM indicator for 12-hour mode
+ */
+static void drawFrameTetris() {
+  if (!tetrisClock) return;  // Safety check
+
+  fbClear(0);  // Clear framebuffer
+
+  // Format time string based on 12/24 hour preference
+  String timeStr;
+  if (cfg.use24h) {
+    // 24-hour format: "HH:MM" (00:00 to 23:59)
+    timeStr = String(currT[0]) + String(currT[1]) + ":" +
+              String(currT[2]) + String(currT[3]);
+  } else {
+    // 12-hour format: " H:MM" or "HH:MM" (space-padded for single digit hours)
+    int hour = (currT[0] - '0') * 10 + (currT[1] - '0');
+    if (hour == 0) hour = 12;  // Midnight is 12 AM
+    else if (hour > 12) hour -= 12;  // Convert to 12-hour
+
+    if (hour < 10) {
+      timeStr = " " + String(hour) + ":" + String(currT[2]) + String(currT[3]);
+    } else {
+      timeStr = String(hour) + ":" + String(currT[2]) + String(currT[3]);
+    }
+  }
+
+  // Update Tetris clock (handles animation internally)
+  // Returns true when animation is complete, false while animating
+  tetrisClock->update(timeStr, cfg.use24h, clockColon);
+}
+
+
+// =========================
+// Clock Mode Management
+// =========================
+
+/**
+ * Switch to a new clock mode with fade transition
+ * @param newMode The clock mode to switch to (0=7-seg, 1=Tetris)
+ */
+static void switchClockMode(uint8_t newMode) {
+  if (newMode >= TOTAL_CLOCK_MODES) return;  // Invalid mode
+  if (newMode == cfg.clockMode) return;  // Already in this mode
+
+  DBG_INFO("Switching clock mode: %d -> %d\n", cfg.clockMode, newMode);
+
+  // Start fade out transition
+  inTransition = true;
+  fadeLevel = 255;
+
+  // Update mode
+  cfg.clockMode = newMode;
+
+  // Save to NVS
+  saveConfig();
+}
+
+/**
+ * Check if auto-rotation should trigger a mode change
+ */
+static void checkAutoRotation() {
+  if (!cfg.autoRotate) return;
+
+  unsigned long now = millis();
+  unsigned long interval = (unsigned long)cfg.rotateInterval * 60000UL;  // Convert minutes to milliseconds
+
+  if (now - lastModeRotation >= interval) {
+    // Rotate to next mode
+    uint8_t nextMode = (cfg.clockMode + 1) % TOTAL_CLOCK_MODES;
+    switchClockMode(nextMode);
+    lastModeRotation = now;
+  }
+}
+
+/**
+ * Apply fade effect to framebuffer
+ * @param level Brightness level (0-255, where 0=black, 255=full brightness)
+ */
+static void applyFade(uint8_t level) {
+  if (level == 255) return;  // No fade needed
+
+  for (int y = 0; y < LED_MATRIX_H; y++) {
+    for (int x = 0; x < LED_MATRIX_W; x++) {
+      // Scale pixel intensity by fade level
+      uint16_t pixel = fb[y][x];
+      fb[y][x] = (pixel * level) / 255;
+    }
+  }
+}
+
+/**
+ * Render the current clock mode with fade transition support
+ */
+static void renderCurrentMode() {
+  // Handle fade transition
+  if (inTransition) {
+    // Fade out (255 -> 128)
+    if (fadeLevel > 128) {
+      fadeLevel -= 8;  // Fade out speed
+      if (fadeLevel < 128) fadeLevel = 128;
+    }
+    // Fade in (128 -> 255)
+    else {
+      fadeLevel += 8;  // Fade in speed
+      if (fadeLevel >= 255) {
+        fadeLevel = 255;
+        inTransition = false;
+      }
+    }
+  }
+
+  // Render based on current mode
+  switch (cfg.clockMode) {
+    case CLOCK_MODE_7SEG:
+      drawFrame();
+      break;
+
+    case CLOCK_MODE_TETRIS:
+      drawFrameTetris();
+      break;
+
+    default:
+      drawFrame();  // Fallback to 7-seg
+      break;
+  }
+
+  // Apply fade if in transition
+  if (inTransition || fadeLevel < 255) {
+    applyFade(fadeLevel);
+  }
+}
+
+/**
+ * Check if current mode needs continuous updates (for animations)
+ * @return true if mode is animating and needs frequent updates
+ */
+static bool modeNeedsAnimation() {
+  if (cfg.clockMode == CLOCK_MODE_TETRIS && tetrisClock) {
+    return tetrisClock->isAnimating();
+  }
+  return false;
+}
 
 // =========================
 // Setup / Loop
@@ -1769,6 +1914,18 @@ void setup() {
     DBG_WARN("Sprite create FAILED. Falling back to direct draw (may flicker).");
   }
 
+  // Initialize Tetris Clock
+  DBG_STEP("Initializing Tetris clock...");
+  tetrisClock = new TetrisClock(fb);
+  DBG_OK("Tetris clock ready.");
+
+  // Initialize mode rotation timer
+  lastModeRotation = millis();
+  DBG("Clock mode: %d, Auto-rotate: %s, Interval: %d min\n",
+      cfg.clockMode,
+      cfg.autoRotate ? "ON" : "OFF",
+      cfg.rotateInterval);
+
   // WiFi
   startWifi();
 
@@ -1807,20 +1964,45 @@ void loop() {
   server.handleClient();
 
   uint32_t now = millis();
-  
+
   // Update sensor data periodically
   if (sensorAvailable && (now - lastSensorUpdate >= SENSOR_UPDATE_INTERVAL)) {
     updateSensorData();
     lastSensorUpdate = now;
   }
 
+  // Check auto-rotation timer
+  checkAutoRotation();
+
+  // Toggle colon blink every second (for Tetris mode)
+  if (now - lastColonToggle >= 1000) {
+    clockColon = !clockColon;
+    lastColonToggle = now;
+  }
+
   // Update clock logic only on second change (once per second)
   // This is where we detect time changes
   bool timeChanged = updateClockLogic();
 
-  // Only redraw display if time actually changed or morph is in progress
-  if (timeChanged || morphStep < MORPH_STEPS) {
-    drawFrame();
+  // Determine if display needs update
+  bool needsUpdate = false;
+
+  if (cfg.clockMode == CLOCK_MODE_7SEG) {
+    // 7-segment mode: update on time change or during morph animation
+    needsUpdate = timeChanged || morphStep < MORPH_STEPS;
+  } else if (cfg.clockMode == CLOCK_MODE_TETRIS) {
+    // Tetris mode: update frequently during animation, or on time change
+    needsUpdate = timeChanged || modeNeedsAnimation() || (now % 100 == 0);
+  }
+
+  // Also update during fade transitions
+  if (inTransition || fadeLevel < 255) {
+    needsUpdate = true;
+  }
+
+  // Render and display if needed
+  if (needsUpdate) {
+    renderCurrentMode();
     renderFBToTFT();
   }
 }
