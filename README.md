@@ -1,42 +1,40 @@
-# CYD RGB LED Matrix (HUB75) Retro Clock
+# ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock
 
 <!-- Note: Update version badge below when FIRMWARE_VERSION changes in include/config.h -->
-![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
-![Platform](https://img.shields.io/badge/platform-ESP32-green.svg)
+![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Platform](https://img.shields.io/badge/platform-ESP32%20Touchdown-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 ![LED Type](https://img.shields.io/badge/LED-HUB75%20RGB-red.svg)
+![Display](https://img.shields.io/badge/display-ILI9488%20480x320-orange.svg)
 
-
-A retro-style RGB LED Matrix (HUB75) clock for the ESP32-2432S028 (CYD - Cheap Yellow Display) that emulates a **64×32 RGB LED Matrix Panel (HUB75)** on a 320×240 TFT display. Features large 7-segment digits with smooth morphing animations, WiFi connectivity, NTP time synchronization, and a web-based configuration interface. 
+A retro-style RGB LED Matrix (HUB75) clock for the **ESP32 Touchdown** that emulates a **64×32 RGB LED Matrix Panel (HUB75)** on a 480×320 ILI9488 TFT display. Features large 7-segment digits with smooth morphing animations, WiFi connectivity, NTP time synchronization, capacitive touch support, and a web-based configuration interface.
 
 ![LED Panel Example](images/LEDMatrix_example.jpg)
 
-
 Clock Example Display
-
 
 ![Clock Display](images/Display1_anim.gif)
 
 ## Features
 
 ### Display
-- **64×32 Virtual RGB LED Matrix (HUB75)** emulation on 320×240 TFT display
+- **64×32 Virtual RGB LED Matrix (HUB75)** emulation on 480×320 TFT display
 - Emulates physical RGB LED Matrix Panel with HUB75 protocol characteristics
-- **Large 7-segment digits** with 1-pixel spacing for improved readability
+- **Large 7-segment digits** with improved readability on larger screen
 - **Smooth morphing animations** when digits change
 - **Adjustable LED appearance**: diameter, gap, color, and brightness
 - **Status bar** showing WiFi, IP address, and date
 - **Landscape orientation** optimized for desktop/shelf display
+- **Higher resolution** (480×320 vs 320×240) for crisp display
 
 ### Connectivity
 - **WiFiManager** for easy WiFi setup (AP mode fallback)
-- **WiFi reset** via BOOT button (3-second hold during power-up)
 - **Web interface WiFi reset** option for remote WiFi reconfiguration
-- **RGB LED status indicators** for visual feedback during startup and operation
 - **NTP time synchronization** with IANA timezone support
 - **Web-based configuration** interface accessible from any browser
 - **OTA firmware updates** for easy maintenance
 - **Live display mirror** in web UI showing real-time framebuffer
+- **Capacitive touch display** (FT62x6 controller) - future touch UI support
 
 ### Configuration
 - Timezone selection from dropdown (88 timezones across 13 geographic regions)
@@ -60,56 +58,88 @@ Clock Example Display
 
 ## Hardware Requirements
 
-### Board: ESP32-2432S028R (Cheap Yellow Display)
+### Board: ESP32 Touchdown
 
-![ESP32 CYD Board Reference](images/Reference_CYD.jpeg)
+![ESP_Touchdown](images/ESP32_TouchDown.jpeg)
 
-The CYD is an affordable ESP32 development board with integrated:
-- 2.8" ILI9341 TFT display (320x240 pixels)
-- XPT2046 resistive touchscreen
-- RGB LED (active low)
-- SD card slot
-- Extended GPIO connector
+The ESP32 Touchdown is a professional-grade ESP32 development board by Dustin Watts with integrated:
+- **ESP32-WROOM-32D** processor (2.4GHz WiFi, Bluetooth)
+- **ILI9488 TFT display** (480×320 pixels, 16-bit color, 4-wire SPI)
+- **FT62x6 capacitive touch controller** (FT6236/FT6206, I2C address 0x38)
+- **MCP73831/SD8016 battery management** (LiPo charging and operation)
+- **CP2102 USB-to-UART bridge** for programming
+- **APK2112/AP7365 3.3V regulator**
+- **GPIO32 backlight control** (PWM capable)
+- **GPIO26 passive buzzer**
+- **microSD card slot** (SD mode)
+- **USB-C connector** for power and programming
+- **Stemma/JST-PH I2C connector** for external sensors
+- **7+ additional GPIO breakout pins** (12, 13, 14, 16, 17, 33, 34)
+
+**GitHub Repository:** [https://github.com/DustinWatts/esp32-touchdown](https://github.com/DustinWatts/esp32-touchdown)
 
 ### Pin Configuration
-The project uses the standard CYD pin configuration:
+The project uses the standard ESP32 Touchdown pin configuration:
 
-**TFT Display Pins** (defined in `include/User_Setup.h`):
+**TFT Display Pins** (ILI9488, 4-wire SPI, defined in `include/User_Setup.h`):
 ```cpp
-TFT_MISO   12
-TFT_MOSI   13
-TFT_SCLK   14
-TFT_CS     15
-TFT_DC      2
-TFT_RST    -1  // Connected to ESP32 RST
-TFT_BL     21  // Backlight control
+TFT_MOSI   23   // SDI (MOSI)
+TFT_SCLK   18   // SPI Clock
+TFT_CS     15   // Chip Select
+TFT_DC      2   // Data/Command (DC_RS)
+TFT_RST     4   // Reset
+TFT_BL     32   // Backlight control (PWM)
+TFT_MISO   -1   // 4-wire SPI (no MISO)
 ```
 
-**RGB LED and Button Pins** (defined in `include/config.h`):
+**Touch Controller Pins** (FT62x6 FT6236/FT6206 via I2C @ 0x38):
 ```cpp
-LED_R_PIN      4   // Red LED (active LOW)
-LED_G_PIN     16   // Green LED (active LOW)
-LED_B_PIN     17   // Blue LED (active LOW)
-BOOT_BTN_PIN   0   // Boot button for WiFi reset (active LOW)
+SDA        21   // I2C Data
+SCL        22   // I2C Clock
+IRQ        27   // Touch Interrupt
 ```
+
+**microSD Card Pins** (SD mode):
+```cpp
+GPIO25     CD/DAT3
+GPIO23     CMD (shared with TFT_MOSI)
+GPIO18     CLK (shared with TFT_SCLK)
+GPIO19     DAT0
+```
+
+**Additional Hardware Pins**:
+```cpp
+GPIO26     Passive Buzzer
+GPIO35     Battery Voltage Divider
+```
+
+**Available GPIO Breakout** (7+ pins):
+```cpp
+GPIO12, GPIO13, GPIO14, GPIO16, GPIO17
+GPIO33, GPIO34 (INPUT only)
+```
+
+**Note:** SPI pins (SCK, SDO, SDA, SCL, SDI) are also broken out but shared with TFT and SD card.
 
 ### Purchase Links
-- [ESP32-2432S028 on AliExpress](https://www.aliexpress.com/wholesale?SearchText=ESP32-2432S028)
-- [ESP32-2432S028 on Amazon](https://www.amazon.com/s?k=ESP32-2432S028)
+- [Tindie: ESP32 Touchdown](https://www.tindie.com/products/dustinwattsnl/esp32-touchdown/)
+- [Lectronz (Netherlands)](https://lectronz.com/products/esp32-touchdown)
+- [Eplop Electronics (UK)](https://store.eplop.co.uk/product/esp32touchdown/)
+- [PCBWay (China)](https://www.pcbway.com/project/gifts_detail/ESP32_TouchDown.html)
 
 ## Software Setup
 
 ### Prerequisites
 - [Visual Studio Code](https://code.visualstudio.com/)
 - [PlatformIO IDE extension](https://platformio.org/install/ide?install=vscode)
-- USB cable (USB-C for CYD)
+- USB-C cable (for ESP32 Touchdown)
 
 ### Installation Steps
 
 #### 1. Clone or Download the Project
 ```bash
 git clone <repository-url>
-cd CYD_LED_Matrix_Retro_Clock
+cd ESP32_Touchdown_Retro_Clock
 ```
 
 #### 2. Open in VS Code with PlatformIO
@@ -122,7 +152,7 @@ code .
 - Select "Build" or press `Ctrl+Alt+B` (Windows/Linux) / `Cmd+Shift+B` (Mac)
 
 #### 4. Upload Firmware
-- Connect your CYD via USB
+- Connect your Touchdown via USB-C
 - Select "Upload" from PlatformIO menu or press `Ctrl+Alt+U`
 - Wait for upload to complete (~30 seconds)
 
@@ -134,7 +164,7 @@ code .
 #### 6. Configure WiFi
 On first boot, the device will create a WiFi access point:
 
-1. Look for WiFi network: **CYD-RetroClock-Setup**
+1. Look for WiFi network: **Touchdown-RetroClock-Setup**
 2. Connect to this network (no password required)
 3. A captive portal should open automatically
 4. If not, navigate to `http://192.168.4.1`
@@ -144,11 +174,8 @@ On first boot, the device will create a WiFi access point:
 8. The device will restart and connect to your WiFi
 
 **WiFi Reset Options:**
-- **BOOT Button Reset**: Hold the BOOT button (GPIO 0) for 3 seconds during power-up to reset WiFi credentials
-  - Yellow LED: Button detected
-  - Red LED: Reset confirmed (release button)
-  - Device will restart in AP mode for reconfiguration
-- **Web Interface Reset**: Use the `/api/reset-wifi` endpoint to reset WiFi remotely (see API section)
+- **Web Interface Reset**: Use the web UI to reset WiFi credentials remotely
+- **USB Serial**: Connect via USB and reset via serial commands
 
 #### 7. Access the Web Interface
 1. Check your router for the device's IP address, or
@@ -190,8 +217,8 @@ The web interface displays comprehensive real-time system information:
 - IP address
 
 **Hardware**
-- Board: ESP32-2432S028 (CYD)
-- Display: 320×240 ILI9341
+- Board: ESP32 Touchdown
+- Display: 480×320 ILI9488
 - Sensors: Status of connected sensors (when implemented)
 - Firmware: Current version
 - OTA: Over-the-air update status
@@ -215,10 +242,10 @@ Settings are stored in `include/config.h`. Default values:
 #define DEFAULT_TZ "Australia/Sydney"
 #define DEFAULT_NTP "pool.ntp.org"
 #define DEFAULT_24H true
-#define DEFAULT_LED_DIAMETER 5
+#define DEFAULT_LED_DIAMETER 7
 #define DEFAULT_LED_GAP 0
 #define DEFAULT_LED_COLOR_565 0xF800  // Red
-#define STATUS_BAR_H 50  // pixels
+#define STATUS_BAR_H 70  // pixels
 ```
 
 ### Security Configuration
@@ -247,12 +274,12 @@ Edit `include/config.h`:
 ### RGB LED Matrix (HUB75) Emulation
 - Each "LED" is rendered as a square pixel of adjustable size
 - Emulates physical 64×32 RGB LED Matrix Panel with HUB75 protocol characteristics
-- Pitch (spacing) is automatically calculated: `min(320/64, 190/32) = 5 pixels per LED`
-- This gives a display size of 320×160 pixels for the clock
-- Status bar occupies the bottom 50 pixels
+- Pitch (spacing) is automatically calculated: `min(480/64, 250/32) = 7 pixels per LED`
+- This gives a display size of 480×224 pixels for the clock
+- Status bar occupies the bottom 70 pixels
 
 ### RGB LED Status Indicators
-The CYD board's built-in RGB LED provides visual feedback during startup and operation:
+The ESP32 Touchdown board can provide visual feedback through GPIO status during startup and operation:
 
 | Color | Meaning |
 |-------|---------|
@@ -289,8 +316,8 @@ The device provides a simple REST API:
     "heapSize": 320000,
     "cpuFreq": 240,
     "debugLevel": 3,
-    "board": "ESP32-2432S028 (CYD)",
-    "display": "320×240 ILI9341",
+    "board": "ESP32 Touchdown",
+    "display": "480×320 ILI9488",
     "sensors": "None detected",
     "firmware": "<FIRMWARE_VERSION from config.h>",
     "otaEnabled": true
@@ -312,7 +339,7 @@ The device provides a simple REST API:
 Once the device is connected to WiFi, you can update firmware wirelessly:
 
 1. In PlatformIO, ensure the device is on the same network
-2. The device should appear as "CYD-RetroClock" in the upload targets
+2. The device should appear as "Touchdown-RetroClock" in the upload targets
 3. Select it and upload as normal
 4. Default password: "change-me" (change this in `config.h`!)
 
@@ -325,8 +352,8 @@ The ArduinoOTA service runs on port 3232. You can use the Arduino IDE's network 
 
 **Problem**: Display is blank or shows garbage
 - **Solution**: Check TFT pin configuration in `include/User_Setup.h`
-- Verify you have the correct CYD variant (ESP32-2432S028)
-- Some variants use different display controllers (ST7789 vs ILI9341)
+- Verify you have the correct ESP32 Touchdown variant
+- The ESP32 Touchdown uses ILI9488 driver with 4-wire SPI interface
 
 **Problem**: Display is upside down
 - **Solution**: TFT is configured for landscape mode. Adjust `tft.setRotation()` in `main.cpp` if needed
@@ -340,7 +367,7 @@ The ArduinoOTA service runs on port 3232. You can use the Arduino IDE's network 
 - **Solution**:
   - Restart the device
   - The AP appears on first boot or if WiFi credentials are invalid
-  - AP SSID: "CYD-RetroClock-Setup"
+  - AP SSID: "Touchdown-RetroClock-Setup"
   - Wait 30 seconds after boot for AP to start
 
 **Problem**: Device won't connect to my WiFi
@@ -385,7 +412,7 @@ The ArduinoOTA service runs on port 3232. You can use the Arduino IDE's network 
 
 ### Project Structure
 ```
-CYD_LED_Matrix_Retro_Clock/
+ESP32_Touchdown_Retro_Clock/
 ├── data/                      # Web UI files (uploaded to LittleFS)
 │   ├── index.html            # Main web interface with diagnostics panel
 │   ├── app.js                # JavaScript for live updates, display mirror, and formatting utilities
@@ -397,7 +424,7 @@ CYD_LED_Matrix_Retro_Clock/
 ├── src/
 │   └── main.cpp              # Main application code with enhanced logging and diagnostics
 ├── platformio.ini            # PlatformIO configuration
-├── CHANGELOG.md              # Version history (updated for v1.0.0)
+├── CHANGELOG.md              # Version history (updated for v2.0.0)
 ├── LICENSE                   # MIT License
 └── README.md                 # This file
 ```
@@ -442,7 +469,7 @@ const LED_H = 64;
 #### Add Different Display Controller
 Edit `include/User_Setup.h`:
 ```cpp
-// Change from ILI9341 to ST7789
+// Change from ILI9488 to ST7789 (for different hardware)
 #define ST7789_DRIVER
 ```
 
@@ -464,22 +491,23 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
+- **Hardware:** [ESP32 Touchdown](https://github.com/DustinWatts/esp32-touchdown) by Dustin Watts
 - Built using [PlatformIO](https://platformio.org/)
 - TFT display library: [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)
 - WiFi management: [WiFiManager](https://github.com/tzapu/WiFiManager)
 - JSON parsing: [ArduinoJson](https://arduinojson.org/)
 - Inspired by classic RGB LED Matrix (HUB75) clocks and 7-segment displays
-- Built with assistance from [Claude Code](https://claude.com/claude-code)
+- Software developed by Anthony Clarke with assistance from [Claude Code](https://claude.com/claude-code)
 
 ## Support
 
 For issues, questions, or suggestions:
-- GitHub Repository: [CYD-RGB-LED-Matrix-HUB75-Retro-Clock](https://github.com/anthonyjclarke/CYD-RGB-LED-Matrix-HUB75-Retro-Clock)
-- Bluesky: [@anthonyjclarke.bsky.social](https://bsky.app/profile/anthonyjclarke.bsky.social)
+- **ESP32 Touchdown Hardware:** [https://github.com/DustinWatts/esp32-touchdown](https://github.com/DustinWatts/esp32-touchdown)
+- **Software Developer:** [@anthonyjclarke.bsky.social](https://bsky.app/profile/anthonyjclarke.bsky.social)
 - Check the troubleshooting section above
 - Review the [CHANGELOG.md](CHANGELOG.md) for known issues and version history
 
-The web interface footer includes quick links to GitHub and Bluesky profiles.
+The web interface footer includes quick links to the ESP32 Touchdown GitHub repository and developer profiles.
 
 ## Version History
 
