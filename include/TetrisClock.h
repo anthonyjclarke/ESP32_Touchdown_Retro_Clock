@@ -8,14 +8,13 @@
  * FramebufferGFX - Adafruit GFX wrapper for our LED matrix framebuffer
  *
  * This class allows TetrisMatrixDraw (which expects an Adafruit_GFX display)
- * to write to our custom uint8_t framebuffer instead of a physical display.
+ * to write to our custom RGB565 framebuffer instead of a physical display.
  *
- * It converts 16-bit RGB565 colors from the Tetris library into 8-bit
- * intensity values (0-255) for our LED matrix emulation.
+ * Stores full RGB565 colors directly for authentic Tetris block colors.
  */
 class FramebufferGFX : public Adafruit_GFX {
 public:
-  FramebufferGFX(uint8_t (*framebuffer)[LED_MATRIX_W], uint8_t w, uint8_t h)
+  FramebufferGFX(uint16_t (*framebuffer)[LED_MATRIX_W], uint8_t w, uint8_t h)
     : Adafruit_GFX(w, h), fb(framebuffer) {}
 
   /**
@@ -27,9 +26,8 @@ public:
   void drawPixel(int16_t x, int16_t y, uint16_t color) override {
     if (x < 0 || x >= LED_MATRIX_W || y < 0 || y >= LED_MATRIX_H) return;
 
-    // Convert RGB565 to 8-bit intensity
-    uint8_t intensity = colorToIntensity(color);
-    fb[y][x] = intensity;
+    // Store full RGB565 color directly
+    fb[y][x] = color;
   }
 
   /**
@@ -37,43 +35,15 @@ public:
    * @param color RGB565 color to fill with
    */
   void fillScreen(uint16_t color) {
-    uint8_t intensity = colorToIntensity(color);
     for (int y = 0; y < LED_MATRIX_H; y++) {
       for (int x = 0; x < LED_MATRIX_W; x++) {
-        fb[y][x] = intensity;
+        fb[y][x] = color;
       }
     }
   }
 
 private:
-  uint8_t (*fb)[LED_MATRIX_W];  // Pointer to our framebuffer
-
-  /**
-   * Convert RGB565 color to 8-bit intensity (0-255)
-   * Uses weighted grayscale conversion based on human perception
-   * @param color565 RGB565 color value
-   * @return Intensity value 0-255
-   */
-  uint8_t colorToIntensity(uint16_t color565) {
-    // If color is 0 (black), return 0 intensity
-    if (color565 == 0) return 0;
-
-    // Extract RGB components from RGB565
-    uint8_t r = (color565 >> 11) & 0x1F;  // 5 bits
-    uint8_t g = (color565 >> 5) & 0x3F;   // 6 bits
-    uint8_t b = color565 & 0x1F;           // 5 bits
-
-    // Scale to 8-bit (0-255)
-    uint8_t r8 = (r * 255) / 31;
-    uint8_t g8 = (g * 255) / 63;
-    uint8_t b8 = (b * 255) / 31;
-
-    // Convert to grayscale using weighted average
-    // Human perception: 30% red, 59% green, 11% blue
-    uint16_t intensity = (r8 * 30 + g8 * 59 + b8 * 11) / 100;
-
-    return (uint8_t)intensity;
-  }
+  uint16_t (*fb)[LED_MATRIX_W];  // Pointer to our RGB565 framebuffer
 };
 
 /**
@@ -86,9 +56,9 @@ class TetrisClock {
 public:
   /**
    * Initialize the Tetris clock with our framebuffer
-   * @param framebuffer Pointer to LED matrix framebuffer
+   * @param framebuffer Pointer to LED matrix RGB565 framebuffer
    */
-  TetrisClock(uint8_t (*framebuffer)[LED_MATRIX_W])
+  TetrisClock(uint16_t (*framebuffer)[LED_MATRIX_W])
     : display(framebuffer, LED_MATRIX_W, LED_MATRIX_H),
       tetrisTime(display),
       tetrisAMPM_M(display),

@@ -209,9 +209,9 @@ int pressure = 0;
 const char* sensorType = "NONE";  // Will be set based on detected sensor
 unsigned long lastSensorUpdate = 0;
 
-// Logical RGB LED Matrix (HUB75) framebuffer: 0..255 intensity
-static uint8_t fb[LED_MATRIX_H][LED_MATRIX_W];
-static uint8_t fbPrev[LED_MATRIX_H][LED_MATRIX_W];  // Previous frame for delta rendering
+// Logical RGB LED Matrix (HUB75) framebuffer: RGB565 color
+static uint16_t fb[LED_MATRIX_H][LED_MATRIX_W];
+static uint16_t fbPrev[LED_MATRIX_H][LED_MATRIX_W];  // Previous frame for delta rendering
 
 // Cached date string for status bar
 static char currDate[11] = "----/--/--";
@@ -255,20 +255,26 @@ static uint16_t rgb888_to_565(uint32_t rgb) {
 }
 
 /**
- * Clear the entire framebuffer to a specific intensity value
- * @param v Intensity value (0-255), default 0 (off)
+ * Clear the entire framebuffer to a specific color
+ * @param color RGB565 color value, default 0 (black/off)
  */
-static void fbClear(uint8_t v = 0) { memset(fb, v, sizeof(fb)); }
+static void fbClear(uint16_t color = 0) {
+  for (int y = 0; y < LED_MATRIX_H; y++) {
+    for (int x = 0; x < LED_MATRIX_W; x++) {
+      fb[y][x] = color;
+    }
+  }
+}
 
 /**
  * Set a single pixel in the framebuffer with bounds checking
  * @param x X coordinate (0 to LED_MATRIX_W-1)
  * @param y Y coordinate (0 to LED_MATRIX_H-1)
- * @param v Intensity value (0-255)
+ * @param color RGB565 color value
  */
-static inline void fbSet(int x, int y, uint8_t v) {
+static inline void fbSet(int x, int y, uint16_t color) {
   if (x < 0 || y < 0 || x >= LED_MATRIX_W || y >= LED_MATRIX_H) return;
-  fb[y][x] = v;
+  fb[y][x] = color;
 }
 
 // =========================
@@ -599,11 +605,6 @@ static void renderFBToTFT() {
   int x0 = (tft.width()  - sprW) / 2;
   int y0 = (matrixAreaH - sprH) / 2;
 
-  // Base RGB components from cfg.ledColor
-  const uint8_t baseR = (cfg.ledColor >> 16) & 0xFF;
-  const uint8_t baseG = (cfg.ledColor >> 8)  & 0xFF;
-  const uint8_t baseB = (cfg.ledColor >> 0)  & 0xFF;
-
   int gapWanted = (int)cfg.ledGap;
   if (gapWanted < 0) gapWanted = 0;
   if (gapWanted > pitch - 1) gapWanted = pitch - 1;
@@ -633,17 +634,11 @@ static void renderFBToTFT() {
 
     for (int y = 0; y < LED_MATRIX_H; y++) {
       for (int x = 0; x < LED_MATRIX_W; x++) {
-        uint8_t v = fb[y][x];
-        if (!v) continue;
+        uint16_t color = fb[y][x];
+        if (color == 0) continue;  // Skip black pixels
 
-        // Scale base color by intensity v (0..255)
-        uint8_t r = (uint8_t)((baseR * (uint16_t)v) / 255);
-        uint8_t g = (uint8_t)((baseG * (uint16_t)v) / 255);
-        uint8_t b = (uint8_t)((baseB * (uint16_t)v) / 255);
-
-        uint16_t colScaled = rgb888_to_565(((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
-
-        spr.fillRect(x * pitch + inset, y * pitch + inset, dot, dot, colScaled);
+        // Use color directly (already RGB565)
+        spr.fillRect(x * pitch + inset, y * pitch + inset, dot, dot, color);
       }
     }
 
@@ -661,28 +656,17 @@ static void renderFBToTFT() {
   // -------------------------
 
   tft.startWrite();  // Batch all SPI writes for speed
-  
+
   for (int y = 0; y < LED_MATRIX_H; y++) {
     for (int x = 0; x < LED_MATRIX_W; x++) {
-      uint8_t v = fb[y][x];
-      uint8_t vPrev = fbPrev[y][x];
-      
+      uint16_t color = fb[y][x];
+      uint16_t colorPrev = fbPrev[y][x];
+
       // Only update pixels that changed
-      if (v == vPrev) continue;
+      if (color == colorPrev) continue;
 
-      uint16_t colScaled;
-      if (v == 0) {
-        // Pixel turned off - draw black
-        colScaled = TFT_BLACK;
-      } else {
-        // Pixel is on - draw with intensity
-        uint8_t r = (uint8_t)((baseR * (uint16_t)v) / 255);
-        uint8_t g = (uint8_t)((baseG * (uint16_t)v) / 255);
-        uint8_t b = (uint8_t)((baseB * (uint16_t)v) / 255);
-        colScaled = rgb888_to_565(((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
-      }
-
-      tft.fillRect(x0 + x * pitch + inset, y0 + y * pitch + inset, dot, dot, colScaled);
+      // Use color directly (already RGB565)
+      tft.fillRect(x0 + x * pitch + inset, y0 + y * pitch + inset, dot, dot, color);
     }
   }
   tft.endWrite();  // Flush all batched writes
@@ -1618,12 +1602,21 @@ static bool updateClockLogic() {
  * @param intensity Brightness level (0-255), default 255
  */
 static void drawBitmapSolid(const Bitmap& bm, int x0, int y0, int w, uint8_t intensity = 255) {
+  // Convert user's LED color to RGB565
+  uint16_t baseColor = rgb888_to_565(cfg.ledColor);
+
+  // Apply intensity scaling to color
+  uint8_t r = ((baseColor >> 11) & 0x1F) * intensity / 255;
+  uint8_t g = ((baseColor >> 5) & 0x3F) * intensity / 255;
+  uint8_t b = (baseColor & 0x1F) * intensity / 255;
+  uint16_t color = (r << 11) | (g << 5) | b;
+
   for (int y=0; y<DIGIT_H; y++) {
     for (int x=0; x<w; x++) {
       bool on = (bm.rows[y] >> (15-x)) & 0x1;
       if (!on) continue;
       int yScaled = (y * LED_MATRIX_H) / DIGIT_H;
-      fbSet(x0 + x, y0 + yScaled, intensity);
+      fbSet(x0 + x, y0 + yScaled, color);
     }
   }
 }
@@ -1658,6 +1651,13 @@ static void drawSpawnMorphToTarget(const Bitmap& toBm, int step, int x0, int y0,
   // Fade-in as it moves
   uint8_t alpha = (uint8_t)(255 * t);
 
+  // Convert user's LED color to RGB565 with alpha
+  uint16_t baseColor = rgb888_to_565(cfg.ledColor);
+  uint8_t r = ((baseColor >> 11) & 0x1F) * alpha / 255;
+  uint8_t g = ((baseColor >> 5) & 0x3F) * alpha / 255;
+  uint8_t b = (baseColor & 0x1F) * alpha / 255;
+  uint16_t color = (r << 11) | (g << 5) | b;
+
   for (int i=0; i<toN; i++) {
     float tx = (float)toPts[i].x;
     float ty = (float)toPts[i].y;
@@ -1669,7 +1669,7 @@ static void drawSpawnMorphToTarget(const Bitmap& toBm, int step, int x0, int y0,
     int y = (int)lroundf(yf);
 
     int yScaled = (y * LED_MATRIX_H) / DIGIT_H;
-    fbSet(x0 + x, y0 + yScaled, alpha);
+    fbSet(x0 + x, y0 + yScaled, color);
   }
 }
 
@@ -1830,9 +1830,21 @@ static void applyFade(uint8_t level) {
 
   for (int y = 0; y < LED_MATRIX_H; y++) {
     for (int x = 0; x < LED_MATRIX_W; x++) {
-      // Scale pixel intensity by fade level
       uint16_t pixel = fb[y][x];
-      fb[y][x] = (pixel * level) / 255;
+      if (pixel == 0) continue;  // Skip black pixels
+
+      // Extract RGB565 components
+      uint8_t r = (pixel >> 11) & 0x1F;
+      uint8_t g = (pixel >> 5) & 0x3F;
+      uint8_t b = pixel & 0x1F;
+
+      // Apply fade level
+      r = (r * level) / 255;
+      g = (g * level) / 255;
+      b = (b * level) / 255;
+
+      // Repack to RGB565
+      fb[y][x] = (r << 11) | (g << 5) | b;
     }
   }
 }
