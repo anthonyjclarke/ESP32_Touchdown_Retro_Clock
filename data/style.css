@@ -1,5 +1,5 @@
 /**
- * CYD RGB LED Matrix (HUB75) Retro Clock - Web Interface Styles
+ * ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock - Web Interface Styles
  *
  * Dark theme with cyberpunk-inspired colors
  * - Status panel with 4-section grid layout
@@ -35,6 +35,8 @@ footer { padding: 16px 16px 22px; text-align: center; opacity: .85; border-top: 
 .footer-link { color: #8ef1ff; text-decoration: none; display: flex; align-items: center; gap: 6px; transition: opacity 0.2s; }
 .footer-link:hover { opacity: 0.7; text-decoration: underline; }
 .footer-link svg { flex-shrink: 0; }
+.footer-link-inline { color: #8ef1ff; text-decoration: none; transition: opacity 0.2s; }
+.footer-link-inline:hover { opacity: 0.7; text-decoration: underline; }
 .footer-separator { opacity: 0.5; }
 .footer-credit { font-size: 12px; opacity: 0.7; }
 

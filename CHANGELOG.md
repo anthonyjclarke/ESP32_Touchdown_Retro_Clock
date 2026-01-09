@@ -1,9 +1,57 @@
 # Changelog
 
-All notable changes to the CYD LED Matrix Retro Clock project will be documented in this file.
+All notable changes to the ESP32 Touchdown LED Matrix Retro Clock project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [2.0.0] - 2026-01-10
+
+### Major Breaking Changes (Hardware Migration)
+⚠️ **This is a major version bump for a complete hardware platform change**
+
+### Changed (Breaking)
+- **Hardware platform**: ESP32-2432S028 (CYD) → ESP32 Touchdown
+- **Display resolution**: 320×240 ILI9341 → 480×320 ILI9488
+- **SPI interface**: 5-wire SPI (with MISO) → 4-wire SPI (no MISO)
+- **Build environment**: `cyd_esp32_2432s028` → `esp32_touchdown`
+- **All GPIO pins**: Complete refactoring for Touchdown board layout
+  - See [User_Setup.h](include/User_Setup.h) for complete new pin mapping
+  - See [config.h](include/config.h) for sensor/button/LED pins
+- **Status bar height**: 50 pixels → 70 pixels
+- **Default LED diameter**: 5 pixels → 7 pixels (larger screen allows bigger LEDs)
+- **LED pitch calculation**: 320÷64=5 → 480÷64=7.5 pixels per LED
+- **OTA hostname**: `CYD-RetroClock` → `Touchdown-RetroClock`
+- **WiFi AP name**: `CYD-RetroClock-Setup` → `Touchdown-RetroClock-Setup`
+
+### Added (New Features)
+- **Capacitive touch display** (FT62x6 controller on I2C) - prepared for future UI implementation
+- **Battery management** support (MCP73831/SD8016 charging IC)
+- **Battery voltage monitoring** (GPIO35 ADC input)
+- **Passive buzzer support** (GPIO26) for future alert sounds
+- **microSD card slot** available for data logging
+- **12 additional GPIO breakout pins** for expansion
+- **USB-C connector** for power and programming
+- **Higher resolution display** (480×320) for crisper rendering
+- **Stemma/JST-PH I2C connector** for easy sensor connection
+
+### Removed
+- **RGB LED status indicators** (CYD built-in feature not available on Touchdown)
+- **BOOT button** for WiFi reset (use web UI or serial instead)
+
+### Fixed
+- Display rendering optimized for larger screen
+- LED matrix pitch calculations corrected for 480×320 resolution
+
+### Migration Guide (from v1.x)
+If upgrading from CYD version:
+1. **Hardware**: Replace ESP32-2432S028 (CYD) with ESP32 Touchdown
+2. **Pins**: Complete pin reconfiguration required - see [User_Setup.h](include/User_Setup.h)
+3. **Build environment**: Update PlatformIO to use `esp32_touchdown` environment
+4. **Firmware upload**: Standard USB-C upload process
+5. **Filesystem**: Run `uploadfs` target to update web UI files to LittleFS
+6. **Config reset**: Settings from v1.x may need manual reconfiguration due to pin changes
+7. **Web UI**: No breaking changes - all existing configurations apply to new hardware
 
 ## [1.0.0] - 2026-01-07
 

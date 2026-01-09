@@ -1,5 +1,7 @@
 /**
- * CYD RGB LED Matrix (HUB75) Retro Clock - Web Interface JavaScript
+ * ESP32 Touchdown LED Matrix (HUB75) Retro Clock - Web Interface JavaScript
+ * Hardware: ESP32 Touchdown by Dustin Watts
+ * GitHub: https://github.com/DustinWatts/esp32-touchdown
  *
  * Features:
  * - Live display mirror rendering with RGB LED Matrix (HUB75) emulation
@@ -21,9 +23,9 @@ const ctx = canvas.getContext("2d");
 ctx.imageSmoothingEnabled = false;
 let mirrorPitch = 1;
 
-const TFT_W = 320;
-const TFT_H = 240;
-const STATUS_BAR_H = 50;  // Must match config.h (bottom status bar)
+const TFT_W = 480;
+const TFT_H = 320;
+const STATUS_BAR_H = 70;  // Must match config.h (bottom status bar)
 const LED_W = 64;
 const LED_H = 32;
 
@@ -180,6 +182,10 @@ async function setControls(state) {
   }
 
   if (!dirtyInputs.has("bl")) $("bl").value = state.brightness;
+  if (!dirtyInputs.has("morphSpeed")) {
+    $("morphSpeed").value = state.morphSpeed || 1;
+    $("morphSpeedVal").textContent = (state.morphSpeed || 1) + "x";
+  }
 
 }
 
@@ -204,6 +210,7 @@ async function saveConfig() {
   const ledDiameterRaw = parseInt($("ledd").value, 10);
   const ledGapRaw = parseInt($("ledg").value, 10);
   const brightness = parseInt($("bl").value, 10);
+  const morphSpeed = parseInt($("morphSpeed").value, 10) || 1;
   const debugLevel = parseInt($("debugLevel").value, 10);
 
   const { r, g, b } = rgbFromHex($("col").value);
@@ -211,7 +218,7 @@ async function saveConfig() {
 
   const ledDiameter = Number.isFinite(ledDiameterRaw) ? ledDiameterRaw : state.ledDiameter;
   const ledGap = Number.isFinite(ledGapRaw) ? ledGapRaw : state.ledGap;
-  const payload = { tz, ntp, use24h, dateFormat, useFahrenheit, ledDiameter, ledGap, ledColor, brightness, debugLevel };
+  const payload = { tz, ntp, use24h, dateFormat, useFahrenheit, ledDiameter, ledGap, ledColor, brightness, morphSpeed, debugLevel };
 
   const res = await fetch("/api/config", {
     method: "POST",
@@ -278,7 +285,7 @@ $("resetWifiBtn").addEventListener("click", async () => {
 
     // Show a message about reconnecting
     setTimeout(() => {
-      setMsg("Device restarting... Connect to CYD-RetroClock-Setup AP to reconfigure WiFi.");
+      setMsg("Device restarting... Connect to Touchdown-RetroClock-Setup AP to reconfigure WiFi.");
     }, 2000);
   } catch (e) {
     // Device likely restarted, which is expected
@@ -394,7 +401,7 @@ function renderMirror(buf, state) {
 }
 
 // Auto-apply on any config field change (instant feedback)
-["tz", "ntp", "use24h", "dateFormat", "useFahrenheit", "ledd", "ledg", "col", "bl", "debugLevel"].forEach((id) => {
+["tz", "ntp", "use24h", "dateFormat", "useFahrenheit", "ledd", "ledg", "col", "bl", "morphSpeed", "debugLevel"].forEach((id) => {
   const el = $(id);
 
   // Immediate save on change for dropdowns and text inputs
@@ -403,10 +410,14 @@ function renderMirror(buf, state) {
     saveConfig().catch(e => setMsg(String(e), false));
   });
 
-  // For number/color inputs, also apply on input (real-time updates as you drag/type)
-  if (["ledd", "ledg", "col", "bl"].includes(id)) {
+  // For number/color/range inputs, also apply on input (real-time updates as you drag/type)
+  if (["ledd", "ledg", "col", "bl", "morphSpeed"].includes(id)) {
     el.addEventListener("input", () => {
       dirtyInputs.add(id);
+      // Update morph speed label in real-time
+      if (id === "morphSpeed") {
+        $("morphSpeedVal").textContent = el.value + "x";
+      }
       saveConfig().catch(e => setMsg(String(e), false));
     });
   }

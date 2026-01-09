@@ -1,11 +1,11 @@
 /*
- * CYD RGB LED Matrix (HUB75) Retro Clock
+ * ESP32 Touchdown LED Matrix (HUB75) Retro Clock
  * Version: See FIRMWARE_VERSION in include/config.h
  *
- * A retro-style RGB LED Matrix (HUB75) clock emulator for the ESP32-2432S028 (CYD - Cheap Yellow Display)
+ * A retro-style RGB LED Matrix (HUB75) clock emulator for the ESP32 Touchdown with ILI9488 480×320 TFT display
  *
  * FEATURES:
- * - 64×32 virtual RGB LED Matrix (HUB75) emulation on 320×240 TFT display
+ * - 64×32 virtual RGB LED Matrix (HUB75) emulation on 480×320 TFT display
  * - Large 7-segment style digits with morphing animations
  * - WiFi configuration via WiFiManager (AP mode fallback)
  * - NTP time synchronization with timezone support (88 timezones across 13 regions)
@@ -26,9 +26,10 @@
  * - LittleFS-based web file serving
  *
  * HARDWARE:
- * - ESP32-2432S028 (CYD) - 2.8" ILI9341 320×240 TFT display
- * - Built-in backlight control (GPIO 21)
+ * - ESP32 Touchdown - ILI9488 480×320 TFT display with capacitive touch (FT62x6)
+ * - Backlight control via GPIO32 (PWM capable)
  * - WiFi connectivity (2.4GHz)
+ * - Battery management (optional LiPo battery)
  * - Emulates 64×32 RGB LED Matrix Panel (HUB75 style)
  *
  * DISPLAY LAYOUT:
@@ -36,7 +37,7 @@
  * - Bottom: Status bar (IP address, date, timezone)
  *
  * CONFIGURATION:
- * - First boot: Creates WiFi AP "CYD-RetroClock-Setup"
+ * - First boot: Creates WiFi AP "Touchdown-RetroClock-Setup"
  * - Connect and configure WiFi credentials via captive portal
  * - Access web UI at device IP address
  * - Adjust timezone (88 options), NTP server (9 presets), time/date format
@@ -51,16 +52,16 @@
  * - GET  /api/timezones - List of 88 global timezones grouped by region
  *
  * FUTURE ENHANCEMENTS:
+ * - [ ] Touch panel support for direct UI interaction
  * - [ ] Multiple display modes (clock, date, temp, custom messages)
  * - [ ] Per-LED color control for RGB LED Matrix effects
- * - [ ] Touch screen support for direct configuration
  * - [ ] Color themes and presets
  * - [ ] MQTT integration for remote control and monitoring
  * - [ ] Mobile-friendly web interface enhancements
  * - [ ] Home Assistant integration
  * - [ ] Web-based OTA upload interface
  * - [ ] Customizable animations and transition effects
- * - [ ] Touch panel diagnostic overlay on TFT display when touched
+ * - [ ] Battery level indicator and power management
  *
  * Author: Built with the help of Claude Code
  * License: MIT
@@ -185,6 +186,9 @@ struct AppConfig {
 
   bool flipDisplay = false;    // false=rotation 1 (IO ports top, USB left), true=rotation 3 (180° flip)
 
+  // Morphing animation speed (multiplier: 1=fast, 10=very slow)
+  uint8_t morphSpeed = 1;      // 1-10, controls digit morphing duration
+
   // Sensor settings
   bool useFahrenheit = false;   // false=Celsius, true=Fahrenheit
 };
@@ -201,6 +205,7 @@ unsigned long lastSensorUpdate = 0;
 
 // Logical RGB LED Matrix (HUB75) framebuffer: 0..255 intensity
 static uint8_t fb[LED_MATRIX_H][LED_MATRIX_W];
+static uint8_t fbPrev[LED_MATRIX_H][LED_MATRIX_W];  // Previous frame for delta rendering
 
 // Cached date string for status bar
 static char currDate[11] = "----/--/--";
@@ -211,36 +216,9 @@ static uint8_t appliedPitch = 0;
 // Sprite settings for flicker-free debug renderer
 static int fbPitch = 2;      // logical LED -> TFT pixels (computed from TFT size + config)
 static bool useSprite = false;
-
 // =========================
-// RGB LED Status Functions
-// =========================
-
-/**
- * Set RGB LED state (CYD RGB LEDs are active LOW)
- * @param red Red LED state (true = ON)
- * @param green Green LED state (true = ON)
- * @param blue Blue LED state (true = ON)
- */
-static void setRGBLed(bool red, bool green, bool blue) {
-  digitalWrite(LED_R_PIN, red ? LOW : HIGH);
-  digitalWrite(LED_G_PIN, green ? LOW : HIGH);
-  digitalWrite(LED_B_PIN, blue ? LOW : HIGH);
-}
-
-/**
- * Flash RGB LED with specified color
- * @param r Red state (0 or 1)
- * @param g Green state (0 or 1)
- * @param b Blue state (0 or 1)
- * @param delayMs Flash duration in milliseconds
- */
-static void flashRGBLed(int r, int g, int b, int delayMs = 200) {
-  setRGBLed(r, g, b);
-  delay(delayMs);
-  setRGBLed(false, false, false);
-}
-
+// Status LED (not available on ESP32 Touchdown)
+// Consider using GPIO breakout pins if status indication is needed
 // =========================
 // Utility Functions
 // =========================
@@ -510,9 +488,9 @@ static int computeRenderPitch() {
   int matrixAreaH = tft.height() - STATUS_BAR_H;
   if (matrixAreaH < 1) matrixAreaH = tft.height();
 
-  // With CYD 320x240 landscape:
-  // pitch = min(320/64, matrixAreaH/32) = min(5, matrixAreaH/32)
-  // Maximum pitch is 5 (limited by width), giving 320×160 display
+  // With Touchdown 480x320 landscape:
+  // pitch = min(480/64, matrixAreaH/32) = min(7, matrixAreaH/32)
+  // Maximum pitch is 7 (limited by width), giving 480×224 display
   // Use min to ensure it fits in both dimensions
   int maxPitch = min(tft.width() / LED_MATRIX_W, matrixAreaH / LED_MATRIX_H);
   if (maxPitch < 1) maxPitch = 1;
@@ -631,7 +609,7 @@ static void renderFBToTFT() {
     lastDbg = millis();
   }
 
-  if (useSprite) {
+  if (useSprite && !DISABLE_SPRITE_RENDERING) {
     spr.fillSprite(TFT_BLACK);
 
     for (int y = 0; y < LED_MATRIX_H; y++) {
@@ -650,7 +628,7 @@ static void renderFBToTFT() {
       }
     }
 
-    // No need to clear TFT region; sprite fully covers its area
+    // Batch SPI operations: startWrite/endWrite reduces flashing
     tft.startWrite();
     spr.pushSprite(x0, y0);
     tft.endWrite();
@@ -659,24 +637,39 @@ static void renderFBToTFT() {
   }
 
   // -------------------------
-  // Fallback (direct draw): slower but correct
+  // Fallback (direct draw): delta rendering
+  // Only update pixels that changed from previous frame (no flashing from full clears)
   // -------------------------
-  tft.fillScreen(TFT_BLACK);
 
+  tft.startWrite();  // Batch all SPI writes for speed
+  
   for (int y = 0; y < LED_MATRIX_H; y++) {
     for (int x = 0; x < LED_MATRIX_W; x++) {
       uint8_t v = fb[y][x];
-      if (!v) continue;
+      uint8_t vPrev = fbPrev[y][x];
+      
+      // Only update pixels that changed
+      if (v == vPrev) continue;
 
-      uint8_t r = (uint8_t)((baseR * (uint16_t)v) / 255);
-      uint8_t g = (uint8_t)((baseG * (uint16_t)v) / 255);
-      uint8_t b = (uint8_t)((baseB * (uint16_t)v) / 255);
-
-      uint16_t colScaled = rgb888_to_565(((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+      uint16_t colScaled;
+      if (v == 0) {
+        // Pixel turned off - draw black
+        colScaled = TFT_BLACK;
+      } else {
+        // Pixel is on - draw with intensity
+        uint8_t r = (uint8_t)((baseR * (uint16_t)v) / 255);
+        uint8_t g = (uint8_t)((baseG * (uint16_t)v) / 255);
+        uint8_t b = (uint8_t)((baseB * (uint16_t)v) / 255);
+        colScaled = rgb888_to_565(((uint32_t)r << 16) | ((uint32_t)g << 8) | b);
+      }
 
       tft.fillRect(x0 + x * pitch + inset, y0 + y * pitch + inset, dot, dot, colScaled);
     }
   }
+  tft.endWrite();  // Flush all batched writes
+  
+  // Save current frame as previous for next iteration
+  memcpy(fbPrev, fb, sizeof(fb));
 
   drawStatusBar();
 }
@@ -704,6 +697,7 @@ static void loadConfig() {
   cfg.ledColor = prefs.getUInt("col", 0xFF0000);
   cfg.brightness = (uint8_t)prefs.getUChar("bl", 255);
   cfg.flipDisplay = prefs.getBool("flip", false);
+  cfg.morphSpeed = (uint8_t)prefs.getUChar("morph", 1);  // Default: 1x speed (20 frames)
   cfg.useFahrenheit = prefs.getBool("useFahr", false);
   debugLevel = (uint8_t)prefs.getUChar("dbglvl", DEBUG_LEVEL);
 
@@ -734,6 +728,7 @@ static void saveConfig() {
   prefs.putUInt("col", cfg.ledColor);
   prefs.putUChar("bl", cfg.brightness);
   prefs.putBool("flip", cfg.flipDisplay);
+  prefs.putUChar("morph", cfg.morphSpeed);
   prefs.putBool("useFahr", cfg.useFahrenheit);
   prefs.putUChar("dbglvl", debugLevel);
   prefs.end();
@@ -937,9 +932,6 @@ static void startNtp() {
   DBG_INFO("Timezone: %s -> %s\n", cfg.tz, tzEnv);
   configTzTime(tzEnv, cfg.ntp);
   DBG_OK("NTP configured.");
-
-  // Green flash on successful NTP config
-  flashRGBLed(0, 1, 0);
 }
 
 static bool getLocalTimeSafe(struct tm& timeinfo, uint32_t timeoutMs = 2000) {
@@ -1073,6 +1065,7 @@ static void handleGetState() {
   doc["ledGap"] = cfg.ledGap;
   doc["ledColor"] = cfg.ledColor;
   doc["brightness"] = cfg.brightness;
+  doc["morphSpeed"] = cfg.morphSpeed;
   doc["flipDisplay"] = cfg.flipDisplay;
 
   // System diagnostics
@@ -1092,8 +1085,8 @@ static void handleGetState() {
   doc["useFahrenheit"] = cfg.useFahrenheit;
 
   // Hardware info (static)
-  doc["board"] = "ESP32-2432S028 (CYD)";
-  doc["display"] = "320×240 ILI9341";
+  doc["board"] = "ESP32 Touchdown";
+  doc["display"] = "480×320 ILI9488";
 
   // Build sensor info string
   String sensorInfo;
@@ -1237,6 +1230,16 @@ static void handlePostConfig() {
     }
   }
 
+  // Morphing speed
+  if (!doc["morphSpeed"].isNull()) {
+    uint8_t oldMorphSpeed = cfg.morphSpeed;
+    cfg.morphSpeed = (uint8_t)constrain(doc["morphSpeed"].as<int>(), 1, 50);
+    if (oldMorphSpeed != cfg.morphSpeed) {
+      DBG_INFO("  [%s] Morph speed changed: %dx -> %dx\n", clientIP.c_str(),
+               oldMorphSpeed, cfg.morphSpeed);
+    }
+  }
+
   // Debug level
   if (!doc["debugLevel"].isNull()) {
     uint8_t oldDebugLevel = debugLevel;
@@ -1272,7 +1275,7 @@ static void handlePostConfig() {
   }
 
   // Constrain LED rendering parameters
-  // ledDiameter: max size of each LED dot (pitch is typically 5 for 320x240)
+  // ledDiameter: max size of each LED dot (pitch is typically 7 for 480x320)
   // ledGap: space between LEDs (gap + dot <= pitch)
   cfg.ledDiameter = constrain(cfg.ledDiameter, 1, 10);
   cfg.ledGap      = constrain(cfg.ledGap, 0, 8);
@@ -1319,37 +1322,28 @@ static void serveStaticFiles() {
 
 /**
  * Callback when WiFiManager enters config portal mode
- * Sets RGB LED to purple (red+blue) to indicate AP mode
+ * Note: No status LEDs on Touchdown - status visible via web interface
  */
 static void configModeCallback(WiFiManager* myWiFiManager) {
   DBG_INFO("Entered WiFi config mode\n");
   DBG("Connect to AP: %s\n", myWiFiManager->getConfigPortalSSID().c_str());
   DBG("Config portal IP: %s\n", WiFi.softAPIP().toString().c_str());
-
-  // Set LED to purple (red+blue) for config mode
-  setRGBLed(1, 0, 1);
 }
 
 static void startWifi() {
   DBG_STEP("Starting WiFi (STA) + WiFiManager...");
   WiFi.mode(WIFI_STA);
 
-  // Blue LED during WiFi connection attempt
-  setRGBLed(0, 0, 1);
-
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
   wm.setConnectTimeout(20);
   wm.setAPCallback(configModeCallback);  // Set callback for config portal
 
-  bool ok = wm.autoConnect("CYD-RetroClock-Setup");
+  bool ok = wm.autoConnect("Touchdown-RetroClock-Setup");
   if (!ok) {
     DBG_WARN("WiFiManager autoConnect failed/timeout. Starting fallback AP...");
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("CYD-RetroClock-AP");
-    // Red LED for failed connection
-    setRGBLed(1, 0, 0);
-    delay(1000);
+    WiFi.softAP("Touchdown-RetroClock-AP");
   }
 
   if (WiFi.isConnected()) {
@@ -1357,11 +1351,8 @@ static void startWifi() {
         WiFi.SSID().c_str(),
         WiFi.localIP().toString().c_str());
     DBG_OK("WiFi ready.");
-    // Green flash for successful connection
-    flashRGBLed(0, 1, 0, 500);
   } else {
     DBG_WARN("WiFi not connected (AP mode).");
-    setRGBLed(false, false, false);
   }
 }
 
@@ -1437,8 +1428,6 @@ static void startOta() {
 
   ArduinoOTA.onStart([]() {
     DBG_INFO("OTA update started\n");
-    // Set RGB LED to cyan (blue+green) during OTA
-    setRGBLed(0, 1, 1);
     // Clear screen for progress bar
     tft.fillScreen(TFT_BLACK);
   });
@@ -1460,8 +1449,6 @@ static void startOta() {
     tft.setTextFont(2);
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.drawString("Restarting...", tft.width() / 2, tft.height() / 2 + 20);
-    // Green flash for successful update
-    flashRGBLed(0, 1, 0, 1000);
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
@@ -1486,10 +1473,8 @@ static void startOta() {
     }
     tft.drawString(errorMsg, tft.width() / 2, tft.height() / 2 + 20);
 
-    // Red LED for error
-    setRGBLed(1, 0, 0);
+    // Note: OTA error - check serial console or web interface for details
     delay(3000);
-    setRGBLed(false, false, false);
 
     // Return to normal display after 3 seconds
     tft.fillScreen(TFT_BLACK);
@@ -1539,11 +1524,11 @@ static void formatDate(struct tm& ti, char* out, size_t n) {
   }
 }
 
-static void updateClockLogic() {
+static bool updateClockLogic() {
   struct tm ti{};
-  if (!getLocalTimeSafe(ti, 50)) return;
+  if (!getLocalTimeSafe(ti, 50)) return false;
 
-  if ((uint32_t)ti.tm_sec == lastSecond) return;
+  if ((uint32_t)ti.tm_sec == lastSecond) return false;
   lastSecond = (uint32_t)ti.tm_sec;
 
   char t6[7] = {0};
@@ -1555,7 +1540,9 @@ static void updateClockLogic() {
     memcpy(currT, t6, 7);
     morphStep = 0;
     DBG("[TIME] %.2s:%.2s:%.2s\n", currT, currT+2, currT+4);
+    return true;  // Time changed, need redraw
   }
+  return true;  // Second changed (for morphing animation), need redraw
 }
 
 /**
@@ -1687,7 +1674,10 @@ static void drawFrame() {
   drawDigit(4, x0 + 4*digitW + 2*gap + 2*colonW + 2*gap);
   drawDigit(5, x0 + 5*digitW + 3*gap + 2*colonW + 2*gap);
 
-  if (morphStep < MORPH_STEPS) morphStep++;
+  // Calculate effective morph steps based on morphSpeed multiplier (1-10)
+  // morphSpeed=1: 20 frames, morphSpeed=10: 200 frames
+  int effectiveMorphSteps = MORPH_STEPS * cfg.morphSpeed;
+  if (morphStep < effectiveMorphSteps) morphStep++;
 }
 
 
@@ -1700,48 +1690,16 @@ void setup() {
 
   DBGLN("");
   DBGLN("========================================");
-  DBGLN(" CYD RGB LED Matrix (HUB75) Retro Clock - DEBUG BOOT");
+  DBGLN(" ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock - DEBUG BOOT");
   DBGLN("========================================");
 
   DBG("Build: %s %s\n", __DATE__, __TIME__);
   DBG("LED grid: %dx%d (fb size: %u bytes)\n", LED_MATRIX_W, LED_MATRIX_H, (unsigned)sizeof(fb));
   DBG("TFT_eSPI version check...\n");
 
-  // Initialize RGB LED pins
-  pinMode(LED_R_PIN, OUTPUT);
-  pinMode(LED_G_PIN, OUTPUT);
-  pinMode(LED_B_PIN, OUTPUT);
-  setRGBLed(false, false, false);  // All off initially
-  DBG_OK("RGB LED initialized.");
-
-  // Initialize boot button
-  pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
-
-  // Check if BOOT button is pressed during startup to reset WiFi
+  // Note: ESP32 Touchdown does not have built-in status LEDs
+  // WiFi reset can be handled via web interface or serial commands
   bool resetWiFi = false;
-  if (digitalRead(BOOT_BTN_PIN) == LOW) {
-    DBG_INFO("BOOT button pressed - checking for WiFi reset...\n");
-    setRGBLed(1, 1, 0);  // Yellow LED to indicate button detected
-
-    // Wait for button to be held for 3 seconds
-    unsigned long pressStart = millis();
-    while (digitalRead(BOOT_BTN_PIN) == LOW && (millis() - pressStart) < 3000) {
-      delay(100);
-    }
-
-    if (millis() - pressStart >= 3000) {
-      resetWiFi = true;
-      DBG_OK("BOOT button held for 3 seconds - WiFi will be reset!");
-      setRGBLed(1, 0, 0);  // Red LED
-      delay(500);
-    } else {
-      DBG_INFO("Button released too early - WiFi will not be reset\n");
-      setRGBLed(false, false, false);
-    }
-  }
-
-  // Flash blue to indicate startup
-  flashRGBLed(0, 0, 1, 500);
 
   initBitmaps();
   loadConfig();
@@ -1799,12 +1757,8 @@ void setup() {
     updateSensorData();
     lastSensorUpdate = millis();
     DBG_OK("Sensor initialized and reading.");
-    // Green flash for sensor found
-    flashRGBLed(0, 1, 0);
   } else {
     DBG_WARN("No sensor detected. Temperature/humidity features disabled.");
-    // Yellow flash (red+green) for no sensor
-    flashRGBLed(1, 1, 0);
   }
 
   // NTP
@@ -1831,18 +1785,20 @@ void loop() {
   ArduinoOTA.handle();
   server.handleClient();
 
-  updateClockLogic();
-
-  // Update sensor data periodically
   uint32_t now = millis();
+  
+  // Update sensor data periodically
   if (sensorAvailable && (now - lastSensorUpdate >= SENSOR_UPDATE_INTERVAL)) {
     updateSensorData();
     lastSensorUpdate = now;
   }
 
-  static uint32_t lastFrame = 0;
-  if (now - lastFrame >= FRAME_MS) {
-    lastFrame = now;
+  // Update clock logic only on second change (once per second)
+  // This is where we detect time changes
+  bool timeChanged = updateClockLogic();
+
+  // Only redraw display if time actually changed or morph is in progress
+  if (timeChanged || morphStep < MORPH_STEPS) {
     drawFrame();
     renderFBToTFT();
   }
