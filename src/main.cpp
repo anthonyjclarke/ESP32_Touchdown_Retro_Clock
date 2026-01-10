@@ -7,7 +7,7 @@
  * FEATURES:
  * - 64×32 virtual RGB LED Matrix (HUB75) emulation on 480×320 TFT display
  * - Multiple clock display modes:
- *   - 7-Segment: Classic LED digits with smooth morphing animations
+ *   - Morphing (Classic): LED digits with smooth morphing animations (based on HariFun's Morphing Clock)
  *   - Tetris: Animated falling blocks form time digits (TetrisAnimation by toblum)
  *   - More modes coming: Analog, Binary, Word Clock, etc.
  * - Clock mode selection and auto-rotation via web interface
@@ -39,7 +39,10 @@
  * - Emulates 64×32 RGB LED Matrix Panel (HUB75 style)
  *
  * DISPLAY MODES:
- * - 7-Segment Mode: Large LED-style digits with morphing animations
+ * - Morphing (Classic) Mode: Large LED-style digits with smooth morphing animations
+ *   - Based on Morphing Clock by Hari Wiguna (HariFun)
+ *   - GitHub: https://github.com/hwiguna/HariFun_166_Morphing_Clock
+ *   - Adapted for RGB LED Matrix (HUB75) emulation
  * - Tetris Mode: Falling Tetris blocks build up the time display
  *   - Uses TetrisAnimation library by Tobias Blum (toblum)
  *   - GitHub: https://github.com/toblum/TetrisAnimation
@@ -54,7 +57,7 @@
  * - First boot: Creates WiFi AP "Touchdown-RetroClock-Setup"
  * - Connect and configure WiFi credentials via captive portal
  * - Access web UI at device IP address
- * - Choose clock mode (7-Segment, Tetris) or enable auto-rotation
+ * - Choose clock mode (Morphing, Tetris) or enable auto-rotation
  * - Adjust timezone (88 options), NTP server (9 presets), time/date format
  * - Customize LED appearance, brightness, and debug level
  * - All changes apply instantly and persist to NVS
@@ -69,6 +72,8 @@
  * CREDITS & ACKNOWLEDGMENTS:
  * - Hardware: ESP32 Touchdown by Dustin Watts
  *   https://github.com/DustinWatts/esp32-touchdown
+ * - Morphing Clock: Morphing Clock by Hari Wiguna (HariFun)
+ *   https://github.com/hwiguna/HariFun_166_Morphing_Clock
  * - Tetris Animation: TetrisAnimation library by Tobias Blum (toblum)
  *   https://github.com/toblum/TetrisAnimation
  * - TFT Display: TFT_eSPI library by Bodmer

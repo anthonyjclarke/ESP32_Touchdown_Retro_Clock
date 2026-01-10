@@ -43,11 +43,15 @@
 
 // ===== CLOCK DISPLAY MODES =====
 // Available clock display modes
-#define CLOCK_MODE_7SEG    0    // Classic 7-segment LED display (default)
-#define CLOCK_MODE_TETRIS  1    // Tetris animation clock
+#define CLOCK_MODE_7SEG    0    // Morphing (Classic) - LED digits with smooth morphing animations
+                                // Based on Morphing Clock by Hari Wiguna (HariFun)
+                                // https://github.com/hwiguna/HariFun_166_Morphing_Clock
+#define CLOCK_MODE_TETRIS  1    // Tetris - Animated falling blocks form time digits
+                                // Uses TetrisAnimation by Tobias Blum (toblum)
+                                // https://github.com/toblum/TetrisAnimation
 // Future modes: CLOCK_MODE_ANALOG, CLOCK_MODE_BINARY, CLOCK_MODE_WORD, etc.
 
-#define DEFAULT_CLOCK_MODE CLOCK_MODE_7SEG  // Default clock mode
+#define DEFAULT_CLOCK_MODE CLOCK_MODE_7SEG  // Default: Morphing (Classic) mode
 #define DEFAULT_AUTO_ROTATE false           // Auto-rotate through clock modes
 #define DEFAULT_ROTATE_INTERVAL 5           // Minutes between mode changes (when auto-rotate enabled)
 

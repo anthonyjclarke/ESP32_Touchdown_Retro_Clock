@@ -21,7 +21,7 @@ Clock Example Display
 - **64×32 Virtual RGB LED Matrix (HUB75)** emulation on 480×320 TFT display
 - Emulates physical RGB LED Matrix Panel with HUB75 protocol characteristics
 - **Multiple Clock Display Modes**:
-  - **7-Segment Mode**: Classic LED digits with smooth morphing animations
+  - **Morphing (Classic) Mode**: LED digits with smooth morphing animations (based on [Morphing Clock](https://github.com/hwiguna/HariFun_166_Morphing_Clock) by Hari Wiguna)
   - **Tetris Mode**: Animated Tetris blocks fall into place to form time digits (using [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum)
   - **More modes coming soon**: Analog, Binary, Word Clock, and more!
 - **Mode Selection**: Choose clock mode via web interface or enable auto-rotation
@@ -42,7 +42,7 @@ Clock Example Display
 - **Capacitive touch display** (FT62x6 controller) - future touch UI support
 
 ### Configuration
-- **Clock Display Mode**: Choose between 7-Segment, Tetris, or enable auto-rotation
+- **Clock Display Mode**: Choose between Morphing (Classic), Tetris, or enable auto-rotation
 - **Auto-Rotation**: Cycle through clock modes every N minutes (configurable interval)
 - Timezone selection from dropdown (88 timezones across 13 geographic regions)
 - NTP server selection from dropdown (9 preset servers including global and regional pools)
@@ -499,13 +499,14 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - **Hardware:** [ESP32 Touchdown](https://github.com/DustinWatts/esp32-touchdown) by Dustin Watts
+- **Morphing Clock:** [Morphing Clock](https://github.com/hwiguna/HariFun_166_Morphing_Clock) by Hari Wiguna (HariFun)
 - **Tetris Clock Animation:** [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum (toblum)
 - Built using [PlatformIO](https://platformio.org/)
 - TFT display library: [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) by Bodmer
 - WiFi management: [WiFiManager](https://github.com/tzapu/WiFiManager) by tzapu
 - Graphics library: [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library) by Adafruit
 - JSON parsing: [ArduinoJson](https://arduinojson.org/) by Benoit Blanchon
-- Inspired by classic RGB LED Matrix (HUB75) clocks and 7-segment displays
+- Inspired by classic RGB LED Matrix (HUB75) clocks and morphing digit displays
 - Software developed by Anthony Clarke with assistance from [Claude Code](https://claude.com/claude-code)
 
 ## Support
