@@ -1338,8 +1338,9 @@ static void handlePostConfig() {
 }
 
 static void handleGetMirror() {
-  const size_t fbSize = LED_MATRIX_W * LED_MATRIX_H;  // 64 * 32 = 2048
-  DBG_VERBOSE("Mirror: Sending %u bytes\n", (unsigned)fbSize);
+  // Framebuffer is now RGB565 (uint16_t), so 2 bytes per pixel
+  const size_t fbSize = LED_MATRIX_W * LED_MATRIX_H * sizeof(uint16_t);  // 64 * 32 * 2 = 4096
+  DBG_VERBOSE("Mirror: Sending %u bytes (RGB565)\n", (unsigned)fbSize);
   server.sendHeader("Cache-Control", "no-store");
   server.send_P(200, "application/octet-stream", (const char*)fb, fbSize);
 }
@@ -1794,12 +1795,26 @@ static void switchClockMode(uint8_t newMode) {
 
   DBG_INFO("Switching clock mode: %d -> %d\n", cfg.clockMode, newMode);
 
-  // Start fade out transition
-  inTransition = true;
-  fadeLevel = 255;
-
   // Update mode
   cfg.clockMode = newMode;
+
+  // Clear the framebuffer for clean transition
+  fbClear();
+
+  // Skip fade transition when switching TO Tetris mode
+  // Tetris will naturally build up the time with falling blocks
+  if (newMode != CLOCK_MODE_TETRIS) {
+    // Start fade transition for other modes
+    inTransition = true;
+    fadeLevel = 255;
+  } else {
+    // Tetris mode: no fade, reset Tetris clock to force all digits to rebuild
+    inTransition = false;
+    fadeLevel = 255;
+    if (tetrisClock) {
+      tetrisClock->reset();  // Force complete rebuild of all digits with falling blocks
+    }
+  }
 
   // Save to NVS
   saveConfig();
@@ -1904,6 +1919,94 @@ static bool modeNeedsAnimation() {
 }
 
 // =========================
+// Startup Display Functions
+// =========================
+
+static int startupY = 10;  // Current Y position for startup text
+static const int startupLineHeight = 20;  // Line height for startup messages
+
+/**
+ * Initialize the startup display
+ */
+static void initStartupDisplay() {
+  tft.init();
+  tft.setRotation(1);  // Landscape orientation for ESP32 Touchdown
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  startupY = 10;
+
+  // Title
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.drawString("ESP32 TOUCHDOWN RETRO CLOCK", 10, startupY);
+  startupY += startupLineHeight + 5;
+
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.drawString("Firmware v" FIRMWARE_VERSION, 10, startupY);
+  startupY += startupLineHeight + 10;
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+}
+
+/**
+ * Display a startup step message on TFT with scrolling
+ * @param msg Message to display
+ * @param color Text color (default white)
+ */
+static void showStartupStep(const char* msg, uint16_t color = TFT_WHITE) {
+  // Check if we need to scroll up
+  if (startupY > tft.height() - startupLineHeight - 5) {
+    // Optimized scroll: use setWindow and fast vertical scroll
+    // Simply use a faster approach - fill black at top and shift position
+    tft.setAddrWindow(0, 0, tft.width(), tft.height() - startupLineHeight);
+
+    // Fast scroll by copying in smaller chunks with yield to prevent watchdog
+    const int chunkHeight = 8;  // Process 8 lines at a time
+    for (int y = startupLineHeight; y < tft.height(); y += chunkHeight) {
+      yield();  // Feed watchdog
+      int h = min(chunkHeight, tft.height() - y);
+      uint16_t lineBuffer[tft.width() * chunkHeight];
+      tft.readRect(0, y, tft.width(), h, lineBuffer);
+      tft.pushImage(0, y - startupLineHeight, tft.width(), h, lineBuffer);
+    }
+
+    // Clear the bottom line where new text will go
+    tft.fillRect(0, tft.height() - startupLineHeight - 5, tft.width(), startupLineHeight + 5, TFT_BLACK);
+
+    // Keep Y position at bottom
+    startupY = tft.height() - startupLineHeight - 5;
+  }
+
+  tft.setTextColor(color, TFT_BLACK);
+  tft.drawString(msg, 10, startupY);
+  startupY += startupLineHeight;
+  yield();  // Feed watchdog after drawing
+}
+
+/**
+ * Display a startup status message (OK, ERROR, WARNING)
+ * @param status Status indicator ("OK", "ERROR", "WARN", etc.)
+ * @param msg Message to display
+ */
+static void showStartupStatus(const char* status, const char* msg) {
+  uint16_t statusColor = TFT_GREEN;
+
+  if (strcmp(status, "ERROR") == 0 || strcmp(status, "ERR") == 0) {
+    statusColor = TFT_RED;
+  } else if (strcmp(status, "WARN") == 0) {
+    statusColor = TFT_ORANGE;
+  } else if (strcmp(status, "OK") == 0) {
+    statusColor = TFT_GREEN;
+  } else {
+    statusColor = TFT_CYAN;
+  }
+
+  char buffer[80];
+  snprintf(buffer, sizeof(buffer), "[%s] %s", status, msg);
+  showStartupStep(buffer, statusColor);
+}
+
+// =========================
 // Setup / Loop
 // =========================
 void setup() {
@@ -1919,39 +2022,59 @@ void setup() {
   DBG("LED grid: %dx%d (fb size: %u bytes)\n", LED_MATRIX_W, LED_MATRIX_H, (unsigned)sizeof(fb));
   DBG("TFT_eSPI version check...\n");
 
+  // Initialize TFT for startup display FIRST
+  initStartupDisplay();
+
+  char buildInfo[60];
+  snprintf(buildInfo, sizeof(buildInfo), "Build: %s %s", __DATE__, __TIME__);
+  showStartupStep(buildInfo);
+  delay(500);
+
   // Note: ESP32 Touchdown does not have built-in status LEDs
   // WiFi reset can be handled via web interface or serial commands
   bool resetWiFi = false;
 
+  showStartupStep("Loading bitmaps...");
   initBitmaps();
+  delay(500);
+
+  showStartupStep("Loading config...");
   loadConfig();
+  delay(500);
 
   // Reset WiFi if button was held during boot
   if (resetWiFi) {
     DBG_INFO("Resetting WiFi credentials...\n");
+    showStartupStatus("INFO", "Resetting WiFi...");
     WiFiManager wm;
     wm.resetSettings();
     delay(1000);
     DBG_OK("WiFi credentials cleared!");
+    showStartupStatus("OK", "WiFi reset");
   }
 
+  showStartupStep("Mounting LittleFS...");
   DBG_STEP("Mounting LittleFS...");
   if (!LittleFS.begin(true)) {
     DBG_ERR("LittleFS mount failed");
+    showStartupStatus("ERROR", "LittleFS failed");
   } else {
     DBG_OK("LittleFS mounted");
+    showStartupStatus("OK", "LittleFS mounted");
   }
+  delay(500);
 
-  // TFT init
-  DBG_STEP("Initialising TFT...");
-  tft.init();
+  // Apply display settings from config
+  showStartupStep("Configuring display...");
   applyDisplayRotation();  // Apply rotation based on config
-  tft.fillScreen(TFT_BLACK);
   setBacklight(cfg.brightness);
   DBG("TFT size (w x h): %d x %d\n", tft.width(), tft.height());
   DBG_OK("TFT ready.");
+  showStartupStatus("OK", "Display configured");
+  delay(500);
 
   // Create SMALL sprite for framebuffer rendering (avoid RAM issues)
+  showStartupStep("Creating framebuffer...");
   DBG_STEP("Creating framebuffer sprite (small)...");
   updateRenderPitch(true);
   int sprW = LED_MATRIX_W * fbPitch;
@@ -1966,14 +2089,20 @@ void setup() {
     spr.pushSprite(x0, y0);
     DBG("Sprite OK: %dx%d\n", sprW, sprH);
     DBG_OK("Sprite ready.");
+    showStartupStatus("OK", "Framebuffer ready");
   } else {
     DBG_WARN("Sprite create FAILED. Falling back to direct draw (may flicker).");
+    showStartupStatus("WARN", "Direct draw mode");
   }
+  delay(500);
 
   // Initialize Tetris Clock
+  showStartupStep("Initializing Tetris...");
   DBG_STEP("Initializing Tetris clock...");
   tetrisClock = new TetrisClock(fb);
   DBG_OK("Tetris clock ready.");
+  showStartupStatus("OK", "Tetris clock ready");
+  delay(500);
 
   // Initialize mode rotation timer
   lastModeRotation = millis();
@@ -1983,25 +2112,36 @@ void setup() {
       cfg.rotateInterval);
 
   // WiFi
+  showStartupStep("Starting WiFi...");
   startWifi();
+  delay(5000);
 
   // Sensor
+  showStartupStep("Checking sensor...");
   sensorAvailable = testSensor();
   if (sensorAvailable) {
     updateSensorData();
     lastSensorUpdate = millis();
     DBG_OK("Sensor initialized and reading.");
+    showStartupStatus("OK", "Sensor detected");
   } else {
     DBG_WARN("No sensor detected. Temperature/humidity features disabled.");
+    showStartupStatus("WARN", "No sensor");
   }
+  delay(500);
 
   // NTP
+  showStartupStep("Starting NTP...");
   startNtp();
+  delay(500);
 
   // OTA
+  showStartupStep("Starting OTA...");
   startOta();
+  delay(500);
 
   // Web
+  showStartupStep("Starting WebServer...");
   DBG_STEP("Starting WebServer + routes...");
   serveStaticFiles();
   server.on("/api/state", HTTP_GET, handleGetState);
@@ -2011,8 +2151,27 @@ void setup() {
   server.on("/api/reset-wifi", HTTP_POST, handleResetWiFi);
   server.begin();
   DBG_OK("WebServer ready.");
+  showStartupStatus("OK", "WebServer ready");
+  delay(500);
 
+  // Show IP address
+  char ipMsg[40];
+  if (WiFi.isConnected()) {
+    snprintf(ipMsg, sizeof(ipMsg), "IP: %s", WiFi.localIP().toString().c_str());
+    showStartupStatus("OK", ipMsg);
+  } else {
+    showStartupStatus("WARN", "WiFi not connected");
+  }
   DBG("Ready. IP: %s\n", WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "0.0.0.0");
+
+  // Show "Ready" message
+  delay(1000);
+  showStartupStep("");
+  showStartupStatus("READY", "System initialized!");
+  delay(1000);  // Show ready message for 10 seconds
+
+  // Clear startup display and start normal operation
+  tft.fillScreen(TFT_BLACK);
 }
 
 void loop() {

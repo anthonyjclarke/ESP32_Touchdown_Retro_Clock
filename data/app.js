@@ -341,11 +341,6 @@ function renderMirror(buf, state) {
   // Debug logging
   console.log(`[Mirror] pitch=${pitch} dot=${dot} gap=${gap} inset=${inset} ledD=${ledDiameter} ledG=${ledGap}`);
 
-  const base = state.ledColor >>> 0;
-  const baseR = (base >> 16) & 255;
-  const baseG = (base >> 8) & 255;
-  const baseB = base & 255;
-
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, TFT_W, TFT_H);
 
@@ -356,20 +351,28 @@ function renderMirror(buf, state) {
 
   // CRITICAL: The C++ framebuffer is declared as fb[LED_MATRIX_H][LED_MATRIX_W]
   // which means fb[y][x], so in linear memory it's row-major: [row0][row1][row2]...
-  // Index calculation: buf[y * LED_W + x]
+  // Each pixel is RGB565 (uint16_t), stored as 2 bytes (little-endian on ESP32)
+  // Index calculation: buf[y * LED_W * 2 + x * 2] for byte offset
 
   let nonZeroCount = 0;
   for (let y = 0; y < LED_H; y++) {
     for (let x = 0; x < LED_W; x++) {
-      const idx = y * LED_W + x;
-      const v = buf[idx];
-      if (!v) continue;
+      // RGB565 is 2 bytes per pixel (little-endian: low byte first, high byte second)
+      const byteIdx = (y * LED_W + x) * 2;
+      const low = buf[byteIdx];
+      const high = buf[byteIdx + 1];
+      const rgb565 = (high << 8) | low;
+
+      if (!rgb565) continue;  // Skip black pixels
 
       nonZeroCount++;
 
-      const r = (baseR * v / 255) | 0;
-      const g = (baseG * v / 255) | 0;
-      const b = (baseB * v / 255) | 0;
+      // Decode RGB565 to RGB888
+      // RGB565 format: RRRRR GGGGGG BBBBB (5 bits R, 6 bits G, 5 bits B)
+      const r = ((rgb565 >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
+      const g = ((rgb565 >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
+      const b = (rgb565 & 0x1F) << 3;          // 5 bits -> 8 bits
+
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(x0 + x * pitch + inset, y0 + y * pitch + inset, dot, dot);
     }

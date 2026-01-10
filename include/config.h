@@ -53,8 +53,8 @@
 
 // Tetris animation speed (milliseconds between animation frames)
 // Lower = faster falling blocks, Higher = slower, more visible animation
-// Recommended: 80-150ms for best visual effect
-#define TETRIS_ANIMATION_SPEED 120          // Default: 120ms between frames
+// Recommended: 500-2000ms for dramatic slow-motion effect
+#define TETRIS_ANIMATION_SPEED 1800         // Default: 1800ms (1.8s) between frames for cinematic slow-motion
 
 // ===== SENSOR CONFIGURATION =====
 // Choose your sensor type by uncommenting ONE of the following:

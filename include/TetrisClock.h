@@ -140,6 +140,17 @@ public:
     display.fillScreen(0);  // Fill with black (0 intensity)
   }
 
+  /**
+   * Reset the Tetris clock to force all digits to rebuild from scratch
+   * This clears internal state so all digits will animate in fresh
+   */
+  void reset() {
+    lastTimeStr = "";  // Force time refresh
+    lastAMPM = "";     // Force AM/PM refresh
+    animating = false;
+    display.fillScreen(0);  // Clear display
+  }
+
 private:
   FramebufferGFX display;           // GFX wrapper for our framebuffer
   TetrisMatrixDraw tetrisTime;      // Main time display
