@@ -231,6 +231,7 @@ bool clockColon = true;              // Colon blink state
 unsigned long lastColonToggle = 0;   // Last colon toggle time
 uint8_t fadeLevel = 255;             // Current fade level (0-255) for mode transitions
 bool inTransition = false;           // True during mode transition fade
+unsigned long lastTetrisUpdate = 0;  // Last Tetris animation update time
 
 // Forward declarations
 static void switchClockMode(uint8_t newMode);
@@ -2046,8 +2047,15 @@ void loop() {
     // 7-segment mode: update on time change or during morph animation
     needsUpdate = timeChanged || morphStep < MORPH_STEPS;
   } else if (cfg.clockMode == CLOCK_MODE_TETRIS) {
-    // Tetris mode: update frequently during animation, or on time change
-    needsUpdate = timeChanged || modeNeedsAnimation() || (now % 100 == 0);
+    // Tetris mode: update at controlled interval for visible block animation
+    if (timeChanged || modeNeedsAnimation()) {
+      needsUpdate = true;
+    }
+    // Also update at regular interval for animation frames (controlled by TETRIS_ANIMATION_SPEED)
+    if (now - lastTetrisUpdate >= TETRIS_ANIMATION_SPEED) {
+      needsUpdate = true;
+      lastTetrisUpdate = now;
+    }
   }
 
   // Also update during fade transitions

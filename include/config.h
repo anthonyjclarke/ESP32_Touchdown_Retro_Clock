@@ -51,6 +51,11 @@
 #define DEFAULT_AUTO_ROTATE false           // Auto-rotate through clock modes
 #define DEFAULT_ROTATE_INTERVAL 5           // Minutes between mode changes (when auto-rotate enabled)
 
+// Tetris animation speed (milliseconds between animation frames)
+// Lower = faster falling blocks, Higher = slower, more visible animation
+// Recommended: 80-150ms for best visual effect
+#define TETRIS_ANIMATION_SPEED 120          // Default: 120ms between frames
+
 // ===== SENSOR CONFIGURATION =====
 // Choose your sensor type by uncommenting ONE of the following:
 // #define USE_BME280        // BME280: Temperature, Humidity, Pressure sensor
