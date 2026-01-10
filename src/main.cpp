@@ -6,13 +6,18 @@
  *
  * FEATURES:
  * - 64×32 virtual RGB LED Matrix (HUB75) emulation on 480×320 TFT display
- * - Large 7-segment style digits with morphing animations
+ * - Multiple clock display modes:
+ *   - 7-Segment: Classic LED digits with smooth morphing animations
+ *   - Tetris: Animated falling blocks form time digits (TetrisAnimation by toblum)
+ *   - More modes coming: Analog, Binary, Word Clock, etc.
+ * - Clock mode selection and auto-rotation via web interface
  * - WiFi configuration via WiFiManager (AP mode fallback)
  * - NTP time synchronization with timezone support (88 timezones across 13 regions)
- * - Web-based configuration interface with live display mirror
+ * - Web-based configuration interface with live display mirror (RGB565 color support)
  * - Adjustable LED appearance (diameter, gap, color, brightness)
  * - Instant auto-apply for all configuration changes (no save button required)
  * - Status bar on TFT showing WiFi, IP, date, and timezone
+ * - Visual startup display showing boot sequence progress
  * - Comprehensive system diagnostics panel in web UI:
  *   - Time & Network (time, date, WiFi status, IP)
  *   - Hardware (board, display, sensors, firmware, OTA status)
@@ -27,19 +32,29 @@
  *
  * HARDWARE:
  * - ESP32 Touchdown - ILI9488 480×320 TFT display with capacitive touch (FT62x6)
+ * - Hardware by Dustin Watts: https://github.com/DustinWatts/esp32-touchdown
  * - Backlight control via GPIO32 (PWM capable)
  * - WiFi connectivity (2.4GHz)
  * - Battery management (optional LiPo battery)
  * - Emulates 64×32 RGB LED Matrix Panel (HUB75 style)
  *
+ * DISPLAY MODES:
+ * - 7-Segment Mode: Large LED-style digits with morphing animations
+ * - Tetris Mode: Falling Tetris blocks build up the time display
+ *   - Uses TetrisAnimation library by Tobias Blum (toblum)
+ *   - GitHub: https://github.com/toblum/TetrisAnimation
+ *   - Authentic multi-color Tetris blocks (RGB565 framebuffer)
+ * - Auto-Rotation: Cycle through modes at configurable intervals
+ *
  * DISPLAY LAYOUT:
- * - Top: Large clock digits (HH:MM:SS) rendered as RGB LED Matrix (HUB75)
+ * - Top: Large clock digits rendered as RGB LED Matrix (HUB75)
  * - Bottom: Status bar (IP address, date, timezone)
  *
  * CONFIGURATION:
  * - First boot: Creates WiFi AP "Touchdown-RetroClock-Setup"
  * - Connect and configure WiFi credentials via captive portal
  * - Access web UI at device IP address
+ * - Choose clock mode (7-Segment, Tetris) or enable auto-rotation
  * - Adjust timezone (88 options), NTP server (9 presets), time/date format
  * - Customize LED appearance, brightness, and debug level
  * - All changes apply instantly and persist to NVS
@@ -48,22 +63,28 @@
  * - GET  /              - Main web interface
  * - GET  /api/state     - Current system state (JSON with diagnostics)
  * - POST /api/config    - Update configuration (logs changes to Serial)
- * - GET  /api/mirror    - Raw framebuffer data for display mirror
+ * - GET  /api/mirror    - Raw framebuffer data for display mirror (RGB565)
  * - GET  /api/timezones - List of 88 global timezones grouped by region
  *
+ * CREDITS & ACKNOWLEDGMENTS:
+ * - Hardware: ESP32 Touchdown by Dustin Watts
+ *   https://github.com/DustinWatts/esp32-touchdown
+ * - Tetris Animation: TetrisAnimation library by Tobias Blum (toblum)
+ *   https://github.com/toblum/TetrisAnimation
+ * - TFT Display: TFT_eSPI library by Bodmer
+ * - Graphics: Adafruit GFX Library by Adafruit
+ * - WiFi Management: WiFiManager by tzapu
+ *
  * FUTURE ENHANCEMENTS:
+ * - [ ] Additional clock modes (Analog, Binary, Word Clock)
  * - [ ] Touch panel support for direct UI interaction
- * - [ ] Multiple display modes (clock, date, temp, custom messages)
  * - [ ] Per-LED color control for RGB LED Matrix effects
  * - [ ] Color themes and presets
  * - [ ] MQTT integration for remote control and monitoring
- * - [ ] Mobile-friendly web interface enhancements
  * - [ ] Home Assistant integration
- * - [ ] Web-based OTA upload interface
- * - [ ] Customizable animations and transition effects
  * - [ ] Battery level indicator and power management
  *
- * Author: Built with the help of Claude Code
+ * Author: Anthony Clarke with assistance from Claude Code
  * License: MIT
  */
 
@@ -1949,32 +1970,18 @@ static void initStartupDisplay() {
 }
 
 /**
- * Display a startup step message on TFT with scrolling
+ * Display a startup step message on TFT with simple wrap-around
  * @param msg Message to display
  * @param color Text color (default white)
  */
 static void showStartupStep(const char* msg, uint16_t color = TFT_WHITE) {
-  // Check if we need to scroll up
+  // Check if we need to wrap to top
   if (startupY > tft.height() - startupLineHeight - 5) {
-    // Optimized scroll: use setWindow and fast vertical scroll
-    // Simply use a faster approach - fill black at top and shift position
-    tft.setAddrWindow(0, 0, tft.width(), tft.height() - startupLineHeight);
+    // Simple approach: wrap back to top and clear that area
+    startupY = 50;  // Start below title area
 
-    // Fast scroll by copying in smaller chunks with yield to prevent watchdog
-    const int chunkHeight = 8;  // Process 8 lines at a time
-    for (int y = startupLineHeight; y < tft.height(); y += chunkHeight) {
-      yield();  // Feed watchdog
-      int h = min(chunkHeight, tft.height() - y);
-      uint16_t lineBuffer[tft.width() * chunkHeight];
-      tft.readRect(0, y, tft.width(), h, lineBuffer);
-      tft.pushImage(0, y - startupLineHeight, tft.width(), h, lineBuffer);
-    }
-
-    // Clear the bottom line where new text will go
-    tft.fillRect(0, tft.height() - startupLineHeight - 5, tft.width(), startupLineHeight + 5, TFT_BLACK);
-
-    // Keep Y position at bottom
-    startupY = tft.height() - startupLineHeight - 5;
+    // Clear the next 3 lines where we'll write
+    tft.fillRect(0, startupY, tft.width(), startupLineHeight * 3, TFT_BLACK);
   }
 
   tft.setTextColor(color, TFT_BLACK);
@@ -2114,7 +2121,10 @@ void setup() {
   // WiFi
   showStartupStep("Starting WiFi...");
   startWifi();
+
+  // Pause, clear screen then continue startup sequence
   delay(5000);
+  tft.fillScreen(TFT_BLACK);
 
   // Sensor
   showStartupStep("Checking sensor...");
@@ -2165,10 +2175,10 @@ void setup() {
   DBG("Ready. IP: %s\n", WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "0.0.0.0");
 
   // Show "Ready" message
-  delay(1000);
+  delay(500);
   showStartupStep("");
   showStartupStatus("READY", "System initialized!");
-  delay(1000);  // Show ready message for 10 seconds
+  delay(5000);  // Wait before clearing display and starting normal operation
 
   // Clear startup display and start normal operation
   tft.fillScreen(TFT_BLACK);

@@ -7,7 +7,7 @@
 ![LED Type](https://img.shields.io/badge/LED-HUB75%20RGB-red.svg)
 ![Display](https://img.shields.io/badge/display-ILI9488%20480x320-orange.svg)
 
-A retro-style RGB LED Matrix (HUB75) clock for the **ESP32 Touchdown** that emulates a **64×32 RGB LED Matrix Panel (HUB75)** on a 480×320 ILI9488 TFT display. Features large 7-segment digits with smooth morphing animations, WiFi connectivity, NTP time synchronization, capacitive touch support, and a web-based configuration interface.
+A retro-style RGB LED Matrix (HUB75) clock for the **ESP32 Touchdown** that emulates a **64×32 RGB LED Matrix Panel (HUB75)** on a 480×320 ILI9488 TFT display. Features multiple clock display modes including classic 7-segment with morphing animations and Tetris-style animated blocks, WiFi connectivity, NTP time synchronization, capacitive touch support, and a web-based configuration interface.
 
 ![LED Panel Example](images/LEDMatrix_example.jpg)
 
@@ -20,12 +20,17 @@ Clock Example Display
 ### Display
 - **64×32 Virtual RGB LED Matrix (HUB75)** emulation on 480×320 TFT display
 - Emulates physical RGB LED Matrix Panel with HUB75 protocol characteristics
-- **Large 7-segment digits** with improved readability on larger screen
-- **Smooth morphing animations** when digits change
+- **Multiple Clock Display Modes**:
+  - **7-Segment Mode**: Classic LED digits with smooth morphing animations
+  - **Tetris Mode**: Animated Tetris blocks fall into place to form time digits (using [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum)
+  - **More modes coming soon**: Analog, Binary, Word Clock, and more!
+- **Mode Selection**: Choose clock mode via web interface or enable auto-rotation
+- **Auto-Rotation**: Automatically cycle through clock modes at configurable intervals
 - **Adjustable LED appearance**: diameter, gap, color, and brightness
 - **Status bar** showing WiFi, IP address, and date
 - **Landscape orientation** optimized for desktop/shelf display
 - **Higher resolution** (480×320 vs 320×240) for crisp display
+- **Startup display**: Visual boot sequence showing initialization progress
 
 ### Connectivity
 - **WiFiManager** for easy WiFi setup (AP mode fallback)
@@ -37,6 +42,8 @@ Clock Example Display
 - **Capacitive touch display** (FT62x6 controller) - future touch UI support
 
 ### Configuration
+- **Clock Display Mode**: Choose between 7-Segment, Tetris, or enable auto-rotation
+- **Auto-Rotation**: Cycle through clock modes every N minutes (configurable interval)
 - Timezone selection from dropdown (88 timezones across 13 geographic regions)
 - NTP server selection from dropdown (9 preset servers including global and regional pools)
 - 12/24 hour time format
@@ -492,10 +499,12 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - **Hardware:** [ESP32 Touchdown](https://github.com/DustinWatts/esp32-touchdown) by Dustin Watts
+- **Tetris Clock Animation:** [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum (toblum)
 - Built using [PlatformIO](https://platformio.org/)
-- TFT display library: [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)
-- WiFi management: [WiFiManager](https://github.com/tzapu/WiFiManager)
-- JSON parsing: [ArduinoJson](https://arduinojson.org/)
+- TFT display library: [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI) by Bodmer
+- WiFi management: [WiFiManager](https://github.com/tzapu/WiFiManager) by tzapu
+- Graphics library: [Adafruit GFX Library](https://github.com/adafruit/Adafruit-GFX-Library) by Adafruit
+- JSON parsing: [ArduinoJson](https://arduinojson.org/) by Benoit Blanchon
 - Inspired by classic RGB LED Matrix (HUB75) clocks and 7-segment displays
 - Software developed by Anthony Clarke with assistance from [Claude Code](https://claude.com/claude-code)
 
