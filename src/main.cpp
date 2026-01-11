@@ -187,7 +187,6 @@ static uint8_t debugLevel = DEBUG_LEVEL;
 // Global Objects & Application State
 // =========================
 TFT_eSPI tft = TFT_eSPI();
-TFT_eSprite spr = TFT_eSprite(&tft);
 
 WebServer server(HTTP_PORT);
 Preferences prefs;
@@ -252,13 +251,9 @@ static uint16_t fbPrev[LED_MATRIX_H][LED_MATRIX_W];  // Previous frame for delta
 
 // Cached date string for status bar
 static char currDate[11] = "----/--/--";
-static uint8_t appliedDot = 0;
-static uint8_t appliedGap = 0;
-static uint8_t appliedPitch = 0;
 
-// Sprite settings for flicker-free debug renderer
-static int fbPitch = 2;      // logical LED -> TFT pixels (computed from TFT size + config)
-static bool useSprite = false;
+// Rendering pitch (logical LED -> TFT pixels, computed from TFT size + config)
+static int fbPitch = 2;
 
 // Clock mode management
 TetrisClock* tetrisClock = nullptr;  // Tetris clock instance (created in setup)
@@ -403,25 +398,9 @@ static void initBitmaps() {
   DBG_OK("Digit bitmaps ready.");
 }
 
-// Morph between two bitmaps into fb, step=0..MORPH_STEPS
-static void drawMorph(const Bitmap& a, const Bitmap& b, int step, int x0, int y0, int w) {
-  for (int y=0; y<DIGIT_H; y++) {
-    for (int x=0; x<w; x++) {
-      bool aon = (a.rows[y] >> (15-x)) & 0x1;
-      bool bon = (b.rows[y] >> (15-x)) & 0x1;
-
-      uint8_t val = 0;
-      if (aon && bon) val = 255;
-      else if (aon && !bon) val = (uint8_t)(255 * (MORPH_STEPS - step) / MORPH_STEPS);
-      else if (!aon && bon) val = (uint8_t)(255 * step / MORPH_STEPS);
-
-      if (val == 0) continue;
-
-      int yScaled = (y * LED_MATRIX_H) / DIGIT_H;
-      fbSet(x0 + x, y0 + yScaled, val);
-    }
-  }
-}
+// =========================
+// Morphing Helper Functions
+// =========================
 
 struct Pt { int8_t x, y; };
 
@@ -438,94 +417,6 @@ static int buildPixelsFromBitmap(const Bitmap& bm, int w, Pt* out, int maxOut) {
   }
   return n;
 }
-
-static inline int dist2(const Pt& a, const Pt& b) {
-  int dx = (int)a.x - (int)b.x;
-  int dy = (int)a.y - (int)b.y;
-  return dx*dx + dy*dy;
-}
-
-// Particle morph between two bitmaps into fb, step=0..MORPH_STEPS
-static void drawParticleMorph(const Bitmap& fromBm,
-                              const Bitmap& toBm,
-                              int step, int x0, int y0,
-                              int w)
-{
-  // Worst case: almost full 16x24 = 384 pixels.
-  // Our 7-seg glyphs are much smaller, but allocate safely.
-  static Pt fromPts[420];
-  static Pt toPts[420];
-  static int matchTo[420];
-  static bool toUsed[420];
-
-  int fromN = buildPixelsFromBitmap(fromBm, w, fromPts, 420);
-  int toN   = buildPixelsFromBitmap(toBm,   w, toPts,   420);
-
-  // Clamp counts to our buffers
-  if (fromN > 420) fromN = 420;
-  if (toN > 420) toN = 420;
-
-  // Greedy nearest-neighbour matching (good enough for small glyphs)
-  for (int j=0; j<toN; j++) toUsed[j] = false;
-
-  int pairs = min(fromN, toN);
-  for (int i=0; i<pairs; i++) {
-    int bestJ = -1;
-    int bestD = 1e9;
-    for (int j=0; j<toN; j++) {
-      if (toUsed[j]) continue;
-      int d = dist2(fromPts[i], toPts[j]);
-      if (d < bestD) { bestD = d; bestJ = j; }
-    }
-    if (bestJ < 0) bestJ = 0;
-    matchTo[i] = bestJ;
-    toUsed[bestJ] = true;
-  }
-
-  // Interp factor 0..1
-  float t = (float)step / (float)MORPH_STEPS;
-
-  // 1) Move matched particles
-  for (int i=0; i<pairs; i++) {
-    Pt a = fromPts[i];
-    Pt b = toPts[matchTo[i]];
-
-    float xf = a.x + (b.x - a.x) * t;
-    float yf = a.y + (b.y - a.y) * t;
-
-    int x = (int)lroundf(xf);
-    int y = (int)lroundf(yf);
-
-    int yScaled = (y * LED_MATRIX_H) / DIGIT_H;
-
-    // Full intensity (motion provides the morph effect)
-    fbSet(x0 + x, y0 + yScaled, 255);
-  }
-
-  // 2) Pixels that exist only in TO: fade in
-  if (toN > fromN) {
-    int extra = toN - fromN;
-    float alpha = t; // 0->1
-    for (int j=0; j<toN && extra>0; j++) {
-      if (toUsed[j]) continue;
-      Pt p = toPts[j];
-      int yScaled = (p.y * LED_MATRIX_H) / DIGIT_H;
-      fbSet(x0 + p.x, y0 + yScaled, (uint8_t)(255 * alpha));
-      extra--;
-    }
-  }
-
-  // 3) Pixels that exist only in FROM: fade out
-  if (fromN > toN) {
-    float alpha = 1.0f - t; // 1->0
-    for (int i=toN; i<fromN; i++) {
-      Pt p = fromPts[i];
-      int yScaled = (p.y * LED_MATRIX_H) / DIGIT_H;
-      fbSet(x0 + p.x, y0 + yScaled, (uint8_t)(255 * alpha));
-    }
-  }
-}
-
 
 // =========================
 // Backlight (PWM if TFT_BL exists)
@@ -560,30 +451,10 @@ static int computeRenderPitch() {
   return maxPitch;
 }
 
-static void rebuildSprite(int pitch) {
-  if (useSprite) {
-    spr.deleteSprite();
-    useSprite = false;
-  }
-
-  spr.setColorDepth(16);
-  int sprW = LED_MATRIX_W * pitch;
-  int sprH = LED_MATRIX_H * pitch;
-  if (sprW <= 0 || sprH <= 0) return;
-
-  if (spr.createSprite(sprW, sprH)) {
-    useSprite = true;
-    spr.fillSprite(TFT_BLACK);
-  } else {
-    useSprite = false;
-  }
-}
-
 static void updateRenderPitch(bool force = false) {
   int pitch = computeRenderPitch();
-  if (!force && pitch == fbPitch && useSprite) return;
+  if (!force && pitch == fbPitch) return;
   fbPitch = pitch;
-  rebuildSprite(fbPitch);
 }
 
 static void drawStatusBar() {
@@ -674,9 +545,6 @@ static void renderFBToTFT() {
 
   int gap = pitch - dot;
   const int inset = (pitch - dot) / 2;
-  appliedDot = (uint8_t)dot;
-  appliedGap = (uint8_t)gap;
-  appliedPitch = (uint8_t)pitch;
 
   // Verbose debug output (print once per second)
   static uint32_t lastDbg = 0;
