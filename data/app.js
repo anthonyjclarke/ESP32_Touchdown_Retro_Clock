@@ -111,7 +111,8 @@ async function setControls(state) {
   $("wifi").textContent = state.wifi;
   $("ip").textContent = state.ip;
 
-  // Environment (Sensor Data)
+  // Environment (Sensor Data) - Display only available readings
+  const envReadings = $("envReadings");
   if (state.sensorAvailable) {
     const tempUnit = state.useFahrenheit ? "°F" : "°C";
     let temp = state.temperature;
@@ -121,13 +122,26 @@ async function setControls(state) {
       temp = Math.round(temp * 9 / 5 + 32);
     }
 
-    $("temperature").textContent = `${temp}${tempUnit}`;
-    $("humidity").textContent = `${state.humidity}%`;
-    $("sensorType").textContent = state.sensorType || "Unknown";
+    // Build HTML based on sensor capabilities from state.sensors
+    let html = `<div class="status-item"><span class="k">Temperature</span> <span id="temperature">${temp}${tempUnit}</span></div>`;
+
+    // Check sensor type to determine what readings to show
+    if (state.sensors && state.sensors.includes("Humid")) {
+      html += `<div class="status-item"><span class="k">Humidity</span> <span id="humidity">${state.humidity}%</span></div>`;
+    }
+
+    if (state.sensors && state.sensors.includes("Press")) {
+      html += `<div class="status-item"><span class="k">Pressure</span> <span id="pressure">${state.pressure} hPa</span></div>`;
+    }
+
+    html += `<div class="status-item"><span class="k">Sensor</span> <span id="sensorType">${state.sensorType || "Unknown"}</span></div>`;
+
+    envReadings.innerHTML = html;
   } else {
-    $("temperature").textContent = "No sensor";
-    $("humidity").textContent = "--";
-    $("sensorType").textContent = "Not detected";
+    envReadings.innerHTML = `
+      <div class="status-item"><span class="k">Temperature</span> <span>--</span></div>
+      <div class="status-item"><span class="k">Sensor</span> <span>Not detected</span></div>
+    `;
   }
 
   // Hardware (static, but included for completeness)
@@ -302,6 +316,44 @@ $("resetWifiBtn").addEventListener("click", async () => {
   }
 });
 
+// Reboot button handler
+$("rebootBtn").addEventListener("click", async () => {
+  if (!confirm("Reboot the device? The clock will restart and reconnect to WiFi.")) {
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/reboot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+
+    if (!res.ok) {
+      setMsg("Reboot failed: " + (await res.text()), false);
+      return;
+    }
+
+    const data = await res.json();
+    setMsg(data.status || "Device rebooting...");
+
+    // Show a message about reconnecting
+    setTimeout(() => {
+      setMsg("Device rebooting... Refreshing page in a moment...");
+    }, 2000);
+
+    // Auto-refresh after device has time to reboot
+    setTimeout(() => {
+      window.location.reload();
+    }, 10000);
+  } catch (e) {
+    // Device likely restarted, which is expected
+    setMsg("Reboot command sent. Page will refresh automatically...");
+    setTimeout(() => {
+      window.location.reload();
+    }, 10000);
+  }
+});
+
 function renderMirror(buf, state) {
   // IMPORTANT: This must exactly match the TFT rendering logic in main.cpp:394-475
   // The TFT uses cfg.ledDiameter and cfg.ledGap to determine dot size and spacing
@@ -391,23 +443,13 @@ function renderMirror(buf, state) {
       ctx.lineTo(TFT_W, barY + 0.5);
       ctx.stroke();
 
-      // Line 1: Temperature and Humidity (matching TFT display)
-      let sensorLine;
-      if (state.sensorAvailable) {
-        const displayTemp = state.useFahrenheit
-          ? Math.round(state.temperature * 9 / 5 + 32)
-          : state.temperature;
-        const tempUnit = state.useFahrenheit ? '°F' : '°C';
-        sensorLine = `Temp: ${displayTemp}${tempUnit}  Humidity: ${state.humidity}%`;
-      } else {
-        sensorLine = "Sensor: Not detected";
-      }
+      // Status bar lines - use data from backend to match TFT display exactly
       ctx.fillStyle = "#8ef1ff";
       ctx.font = "14px monospace";
       ctx.textBaseline = "top";
-      ctx.fillText(sensorLine, 6, barY + 6);
+      ctx.fillText(state.statusLine1 || "Loading...", 6, barY + 6);
       ctx.fillStyle = "#c8d6e6";
-      ctx.fillText(`${state.date}  ${state.tz}`, 6, barY + 26);
+      ctx.fillText(state.statusLine2 || "", 6, barY + 26);
     }
   }
 }

@@ -7,8 +7,8 @@
 
 #define ILI9488_DRIVER
 
-#define TFT_WIDTH  480
-#define TFT_HEIGHT 320
+// Display dimensions are defined by ILI9488_Defines.h as 320x480 (portrait)
+// We use setRotation(1) to get landscape mode which swaps to 480x320
 
 // SPI pins for ESP32 Touchdown
 #define TFT_MISO  -1   // ILI9488 in 4-wire SPI mode (no MISO)
@@ -24,8 +24,10 @@
 #define TFT_BACKLIGHT_ON HIGH
 
 // Touch controller (FT62x6 on I2C)
-// IRQ pin for touch interrupt (optional, not currently used)
-#define TOUCH_IRQ  27  // Interrupt pin (optional)
+// ESP32 Touchdown uses I2C touch (FT62x6), not SPI touch
+// Define TOUCH_CS as -1 to disable SPI touch warnings
+#define TOUCH_CS   -1  // Not used (I2C touch controller)
+#define TOUCH_IRQ  27  // Interrupt pin (optional, not currently used)
 
 #define SPI_FREQUENCY  40000000
 #define SPI_READ_FREQUENCY  20000000

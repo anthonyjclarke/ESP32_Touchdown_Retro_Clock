@@ -11,7 +11,7 @@
 // ===== FIRMWARE VERSION =====
 #define FIRMWARE_VERSION "2.0.0"
 
-// ===== LED MATRIX EMULATION =====
+// ===== LED MATRIX PANEL EMULATION =====
 // Logical LED grid (single 64x32 panel)
 #ifndef LED_MATRIX_W
 #define LED_MATRIX_W 64
@@ -58,13 +58,16 @@
 // Tetris animation speed (milliseconds between animation frames)
 // Lower = faster falling blocks, Higher = slower, more visible animation
 // Recommended: 500-2000ms for dramatic slow-motion effect
+
 #define TETRIS_ANIMATION_SPEED 1800         // Default: 1800ms (1.8s) between frames for cinematic slow-motion
 
 // ===== SENSOR CONFIGURATION =====
 // Choose your sensor type by uncommenting ONE of the following:
-// #define USE_BME280        // BME280: Temperature, Humidity, Pressure sensor
-// #define USE_SHT3X         // SHT3X: Temperature and Humidity sensor (no pressure)
-#define USE_HTU21D           // HTU21D: Temperature and Humidity sensor (no pressure) - DEFAULT
+// #define USE_BME280        // BME280: Temperature, Humidity, Pressure sensor (I2C: 0x76 or 0x77)
+#define USE_BMP280        // BMP280: Temperature and Pressure sensor (no humidity) (I2C: 0x76 or 0x77)
+// #define USE_BMP180        // BMP180: Temperature and Pressure sensor (no humidity) (I2C: 0x77 only)
+// #define USE_SHT3X         // SHT3X: Temperature and Humidity sensor (no pressure) (I2C: 0x44 or 0x45)
+// #define USE_HTU21D        // HTU21D: Temperature and Humidity sensor (no pressure) (I2C: 0x40) - DEFAULT
 
 // I2C pins for sensor
 // Note: GPIO 21/22 are used by touch controller (FT62x6) on Touchdown

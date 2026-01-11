@@ -81,7 +81,7 @@
 
         <label>Display Style
           <select id="clockMode">
-            <option value="0">7-Segment (Classic)</option>
+            <option value="0">Morphing (Classic)</option>
             <option value="1">Tetris Animation</option>
           </select>
         </label>
@@ -123,6 +123,9 @@
           <button id="resetWifiBtn" style="width: 100%; padding: 10px; font-size: 14px; background: #521a1a; border: 1px solid #822a2a; color: #ffb3b3; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
             📶 Reset WiFi
           </button>
+          <button id="rebootBtn" style="width: 100%; padding: 10px; font-size: 14px; background: #52391a; border: 1px solid #82592a; color: #ffd9b3; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
+            🔌 Reboot Device
+          </button>
         </div>
       </div>
 
@@ -143,9 +146,12 @@
 
         <div class="status-section">
           <h3>Environment</h3>
-          <div class="status-item"><span class="k">Temperature</span> <span id="temperature">--</span></div>
-          <div class="status-item"><span class="k">Humidity</span> <span id="humidity">--</span></div>
-          <div class="status-item"><span class="k">Sensor</span> <span id="sensorType">--</span></div>
+          <div id="envReadings">
+            <div class="status-item"><span class="k">Temperature</span> <span id="temperature">--</span></div>
+            <div class="status-item"><span class="k">Humidity</span> <span id="humidity">--</span></div>
+            <div class="status-item"><span class="k">Pressure</span> <span id="pressure">--</span></div>
+            <div class="status-item"><span class="k">Sensor</span> <span id="sensorType">--</span></div>
+          </div>
         </div>
 
         <div class="status-section">

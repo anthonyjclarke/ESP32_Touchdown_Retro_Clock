@@ -73,9 +73,10 @@ public:
    * @param timeStr Time string in format "HH:MM" or "H:MM"
    * @param use24h True for 24-hour format, false for 12-hour with AM/PM
    * @param showColon True to show colon between hours and minutes
+   * @param isPM True if PM, false if AM (only used when use24h=false)
    * @return True if animation is complete, false if still animating
    */
-  bool update(const String& timeStr, bool use24h, bool showColon) {
+  bool update(const String& timeStr, bool use24h, bool showColon, bool isPM = false) {
     // Store current time for comparison
     if (lastTimeStr != timeStr) {
       lastTimeStr = timeStr;
@@ -86,9 +87,8 @@ public:
 
       // Handle AM/PM for 12-hour format
       if (!use24h) {
-        // Get current hour to determine AM/PM
-        int hour = timeStr.substring(0, timeStr.indexOf(':')).toInt();
-        String ampm = (hour >= 12) ? "PM" : "AM";
+        // Use the isPM parameter to determine AM/PM
+        String ampm = isPM ? "PM" : "AM";
 
         if (lastAMPM != ampm) {
           lastAMPM = ampm;

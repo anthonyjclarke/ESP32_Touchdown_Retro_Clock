@@ -255,6 +255,33 @@ Settings are stored in `include/config.h`. Default values:
 #define STATUS_BAR_H 70  // pixels
 ```
 
+### Sensor Configuration (Optional)
+The clock supports optional I2C temperature/humidity/pressure sensors connected via the Stemma/JST-PH I2C connector on the ESP32 Touchdown board.
+
+**Supported Sensors:**
+- **BME280**: Temperature, Humidity, Pressure (I2C: 0x76 or 0x77)
+- **BMP280**: Temperature, Pressure (I2C: 0x76 or 0x77)
+- **BMP180**: Temperature, Pressure (I2C: 0x77 only)
+- **SHT3X**: Temperature, Humidity (I2C: 0x44 or 0x45)
+- **HTU21D**: Temperature, Humidity (I2C: 0x40) - **DEFAULT**
+
+**To enable a sensor**, edit `include/config.h` and uncomment ONE sensor type:
+```cpp
+// Choose your sensor type by uncommenting ONE of the following:
+// #define USE_BME280        // BME280: Temperature, Humidity, Pressure
+// #define USE_BMP280        // BMP280: Temperature, Pressure (no humidity)
+// #define USE_BMP180        // BMP180: Temperature, Pressure (no humidity)
+// #define USE_SHT3X         // SHT3X: Temperature, Humidity (no pressure)
+#define USE_HTU21D           // HTU21D: Temperature, Humidity (no pressure) - DEFAULT
+```
+
+**I2C Connection:**
+- The sensors share the I2C bus with the FT62x6 touch controller
+- Connect via the Stemma/JST-PH connector (GPIO21/SDA, GPIO22/SCL)
+- Or use the SDA/SCL breakout pins on the board
+
+**Note:** Sensor readings will appear in the web UI diagnostics panel and serial output. The clock will work without a sensor - it will simply show "None detected" in the diagnostics.
+
 ### Security Configuration
 **IMPORTANT**: Change the OTA password before deploying:
 

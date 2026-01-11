@@ -17,7 +17,6 @@
  * - Adjustable LED appearance (diameter, gap, color, brightness)
  * - Instant auto-apply for all configuration changes (no save button required)
  * - Status bar on TFT showing WiFi, IP, date, and timezone
- * - Visual startup display showing boot sequence progress
  * - Comprehensive system diagnostics panel in web UI:
  *   - Time & Network (time, date, WiFi status, IP)
  *   - Hardware (board, display, sensors, firmware, OTA status)
@@ -117,6 +116,12 @@
 #ifdef USE_BME280
   #include <Adafruit_BME280.h>
 #endif
+#ifdef USE_BMP280
+  #include <Adafruit_BMP280.h>
+#endif
+#ifdef USE_BMP180
+  #include <Adafruit_BMP085.h>
+#endif
 #ifdef USE_SHT3X
   #include <Adafruit_SHT31.h>
 #endif
@@ -190,6 +195,12 @@ Preferences prefs;
 // Sensor objects (only one will be initialized based on configuration)
 #ifdef USE_BME280
   Adafruit_BME280 bme280;
+#endif
+#ifdef USE_BMP280
+  Adafruit_BMP280 bmp280(&Wire);
+#endif
+#ifdef USE_BMP180
+  Adafruit_BMP085 bmp180;
 #endif
 #ifdef USE_SHT3X
   Adafruit_SHT31 sht3x = Adafruit_SHT31();
@@ -585,11 +596,28 @@ static void drawStatusBar() {
   if (barY < 0) barY = tft.height();
 
   char line1[64];
-  // Line 1: Temperature and Humidity
+  // Line 1: Temperature, Humidity (if available), Pressure (if available)
   if (sensorAvailable) {
     int displayTemp = cfg.useFahrenheit ? (temperature * 9 / 5 + 32) : temperature;
     const char* tempUnit = cfg.useFahrenheit ? "oF" : "oC";  // Using 'o' as degree symbol
-    snprintf(line1, sizeof(line1), "Temp: %d%s  Humidity: %d%%", displayTemp, tempUnit, humidity);
+
+    // Build status string based on sensor capabilities
+    char tempStr[32];
+    snprintf(tempStr, sizeof(tempStr), "Temp: %d%s", displayTemp, tempUnit);
+
+#if defined(USE_BME280)
+    // BME280 has all three: temp, humidity, pressure
+    snprintf(line1, sizeof(line1), "%s  Humid: %d%%  Press: %dhPa", tempStr, humidity, pressure);
+#elif defined(USE_BMP280) || defined(USE_BMP180)
+    // BMP280/BMP180 have temp and pressure only
+    snprintf(line1, sizeof(line1), "%s  Pressure: %d hPa", tempStr, pressure);
+#elif defined(USE_SHT3X) || defined(USE_HTU21D)
+    // SHT3X/HTU21D have temp and humidity only
+    snprintf(line1, sizeof(line1), "%s  Humidity: %d%%", tempStr, humidity);
+#else
+    // Unknown sensor, just show temp
+    snprintf(line1, sizeof(line1), "%s", tempStr);
+#endif
   } else {
     snprintf(line1, sizeof(line1), "Sensor: Not detected");
   }
@@ -601,7 +629,9 @@ static void drawStatusBar() {
   uint32_t now = millis();
   bool changed = (strncmp(line1, lastLine1, sizeof(line1)) != 0) ||
                  (strncmp(line2, lastLine2, sizeof(line2)) != 0);
-  if (!changed && (now - lastDrawMs) < 1000) return;
+
+  // Only redraw if content actually changed (prevents flashing every second)
+  if (!changed) return;
 
   strlcpy(lastLine1, line1, sizeof(lastLine1));
   strlcpy(lastLine2, line2, sizeof(lastLine2));
@@ -656,31 +686,28 @@ static void renderFBToTFT() {
     lastDbg = millis();
   }
 
-  if (useSprite && !DISABLE_SPRITE_RENDERING) {
+  // -------------------------
+  // Direct TFT rendering: delta rendering (only update changed pixels)
+  // Note: Sprite rendering is disabled (DISABLE_SPRITE_RENDERING=1) for smooth morphing
+  // -------------------------
+#if !DISABLE_SPRITE_RENDERING
+  // Sprite rendering path (currently disabled)
+  if (useSprite) {
     spr.fillSprite(TFT_BLACK);
-
     for (int y = 0; y < LED_MATRIX_H; y++) {
       for (int x = 0; x < LED_MATRIX_W; x++) {
         uint16_t color = fb[y][x];
-        if (color == 0) continue;  // Skip black pixels
-
-        // Use color directly (already RGB565)
+        if (color == 0) continue;
         spr.fillRect(x * pitch + inset, y * pitch + inset, dot, dot, color);
       }
     }
-
-    // Batch SPI operations: startWrite/endWrite reduces flashing
     tft.startWrite();
     spr.pushSprite(x0, y0);
     tft.endWrite();
     drawStatusBar();
     return;
   }
-
-  // -------------------------
-  // Fallback (direct draw): delta rendering
-  // Only update pixels that changed from previous frame (no flashing from full clears)
-  // -------------------------
+#endif
 
   tft.startWrite();  // Batch all SPI writes for speed
 
@@ -824,6 +851,56 @@ static bool testSensor() {
   sensorType = "BME280";
   return true;
 
+#elif defined(USE_BMP280)
+  // Test BMP280 sensor (temperature and pressure only, no humidity)
+  if (!bmp280.begin(0x76)) {
+    DBG_WARN("BMP280 sensor not found at 0x76\n");
+    if (!bmp280.begin(0x77)) {
+      DBG_WARN("BMP280 sensor not found at 0x77 either\n");
+      return false;
+    }
+  }
+
+  // Configure BMP280 for weather monitoring
+  bmp280.setSampling(Adafruit_BMP280::MODE_NORMAL,     // Operating mode
+                     Adafruit_BMP280::SAMPLING_X2,     // Temperature oversampling
+                     Adafruit_BMP280::SAMPLING_X16,    // Pressure oversampling
+                     Adafruit_BMP280::FILTER_X16,      // Filtering
+                     Adafruit_BMP280::STANDBY_MS_500); // Standby time
+
+  float temp = bmp280.readTemperature();
+  float pressure = bmp280.readPressure() / 100.0F;  // Convert Pa to hPa
+
+  if (isnan(temp) || isnan(pressure) || temp < -50 || temp > 100 || pressure < 300 || pressure > 1100) {
+    DBG_WARN("BMP280 readings invalid\n");
+    return false;
+  }
+
+  DBG_INFO("BMP280 OK: %.1f°C, %.1f hPa\n", temp, pressure);
+  sensorType = "BMP280";
+  return true;
+
+#elif defined(USE_BMP180)
+  // Test BMP180 sensor (temperature and pressure only, no humidity)
+  // BMP180 has fixed I2C address 0x77
+  if (!bmp180.begin(BMP085_MODE_ULTRAHIGHRES)) {
+    DBG_WARN("BMP180 sensor not found at 0x77\n");
+    return false;
+  }
+
+  // Read initial values to verify sensor is working
+  float temp = bmp180.readTemperature();
+  float pressure = bmp180.readPressure() / 100.0F;  // Convert Pa to hPa
+
+  if (isnan(temp) || isnan(pressure) || temp < -50 || temp > 100 || pressure < 300 || pressure > 1100) {
+    DBG_WARN("BMP180 readings invalid\n");
+    return false;
+  }
+
+  DBG_INFO("BMP180 OK: %.1f°C, %.1f hPa\n", temp, pressure);
+  sensorType = "BMP180";
+  return true;
+
 #elif defined(USE_SHT3X)
   // Test SHT3X sensor
   if (!sht3x.begin(0x44)) {  // Default I2C address for SHT3X
@@ -890,6 +967,18 @@ static void updateSensorData() {
   hum = bme280.readHumidity();
   pres = bme280.readPressure() / 100.0F;
 
+#elif defined(USE_BMP280)
+  // Read BMP280 sensor (temperature and pressure only, no humidity)
+  temp = bmp280.readTemperature();
+  pres = bmp280.readPressure() / 100.0F;  // Convert Pa to hPa
+  // BMP280 doesn't have humidity sensor, so humidity remains NAN
+
+#elif defined(USE_BMP180)
+  // Read BMP180 sensor (temperature and pressure only, no humidity)
+  temp = bmp180.readTemperature();
+  pres = bmp180.readPressure() / 100.0F;  // Convert Pa to hPa
+  // BMP180 doesn't have humidity sensor, so humidity remains NAN
+
 #elif defined(USE_SHT3X)
   // Read SHT3X sensor
   temp = sht3x.readTemperature();
@@ -913,30 +1002,36 @@ static void updateSensorData() {
     humidity = (int)round(hum);
   }
 
-  // Update pressure if valid (only for BME280)
+  // Update pressure if valid (BME280 and BMP280 sensors)
   if (!isnan(pres) && pres >= 800 && pres <= 1200) {
     pressure = (int)round(pres);
   }
 
   // Output sensor readings to serial (always at INFO level for visibility)
-  if (cfg.useFahrenheit) {
-    int tempF = temperature * 9 / 5 + 32;
-    DBG_INFO("Sensor Update - %s: %d°F (%d°C), Humidity: %d%%",
-             sensorType, tempF, temperature, humidity);
-  } else {
-    DBG_INFO("Sensor Update - %s: %d°C, Humidity: %d%%",
-             sensorType, temperature, humidity);
-  }
+  if (debugLevel >= DBG_LEVEL_INFO) {
+    if (cfg.useFahrenheit) {
+      int tempF = temperature * 9 / 5 + 32;
+      Serial.printf("[INFO] Sensor Update - %s: %d°F (%d°C)", sensorType, tempF, temperature);
+    } else {
+      Serial.printf("[INFO] Sensor Update - %s: %d°C", sensorType, temperature);
+    }
 
-#ifdef USE_BME280
-  if (pressure > 0) {
-    DBG_INFO(", Pressure: %d hPa\n", pressure);
-  } else {
-    DBG_INFO("\n");
-  }
-#else
-  DBG_INFO("\n");
+    // Add humidity if sensor supports it (BME280, SHT3X, HTU21D)
+#if defined(USE_BME280) || defined(USE_SHT3X) || defined(USE_HTU21D)
+    if (humidity >= 0) {
+      Serial.printf(", Humidity: %d%%", humidity);
+    }
 #endif
+
+    // Add pressure if sensor supports it (BME280, BMP280, BMP180)
+#if defined(USE_BME280) || defined(USE_BMP280) || defined(USE_BMP180)
+    if (pressure > 0) {
+      Serial.printf(", Pressure: %d hPa", pressure);
+    }
+#endif
+
+    Serial.printf("\n");
+  }
 }
 
 // =========================
@@ -1056,6 +1151,23 @@ static void handleResetWiFi() {
 }
 
 /**
+ * POST /api/reboot
+ *
+ * Reboots the device cleanly. Useful for applying settings or recovering from issues.
+ */
+static void handleReboot() {
+  String clientIP = server.client().remoteIP().toString();
+  DBG_INFO("Web: POST /api/reboot from %s\n", clientIP.c_str());
+
+  server.send(200, "application/json", "{\"status\":\"Device rebooting...\"}");
+
+  delay(1000);
+
+  DBG_OK("Rebooting device via web interface...");
+  ESP.restart();
+}
+
+/**
  * GET /api/state
  *
  * Returns comprehensive system state as JSON for web interface.
@@ -1123,6 +1235,29 @@ static void handleGetState() {
   doc["pressure"] = pressure;
   doc["useFahrenheit"] = cfg.useFahrenheit;
 
+  // Status bar text (matches TFT display exactly)
+  char statusLine1[64];
+  if (sensorAvailable) {
+    int displayTemp = cfg.useFahrenheit ? (temperature * 9 / 5 + 32) : temperature;
+    const char* tempUnit = cfg.useFahrenheit ? "°F" : "°C";
+    char tempStr[32];
+    snprintf(tempStr, sizeof(tempStr), "Temp: %d%s", displayTemp, tempUnit);
+
+#if defined(USE_BME280)
+    snprintf(statusLine1, sizeof(statusLine1), "%s  Humid: %d%%  Press: %dhPa", tempStr, humidity, pressure);
+#elif defined(USE_BMP280) || defined(USE_BMP180)
+    snprintf(statusLine1, sizeof(statusLine1), "%s  Pressure: %d hPa", tempStr, pressure);
+#elif defined(USE_SHT3X) || defined(USE_HTU21D)
+    snprintf(statusLine1, sizeof(statusLine1), "%s  Humidity: %d%%", tempStr, humidity);
+#else
+    snprintf(statusLine1, sizeof(statusLine1), "%s", tempStr);
+#endif
+  } else {
+    snprintf(statusLine1, sizeof(statusLine1), "Sensor: Not detected");
+  }
+  doc["statusLine1"] = statusLine1;
+  doc["statusLine2"] = String(dbuf) + "  " + String(cfg.tz);
+
   // Hardware info (static)
   doc["board"] = "ESP32 Touchdown";
   doc["display"] = "480×320 ILI9488";
@@ -1131,8 +1266,12 @@ static void handleGetState() {
   String sensorInfo;
   if (sensorAvailable) {
     sensorInfo = String(sensorType);
-#ifdef USE_BME280
+#if defined(USE_BME280)
     sensorInfo += " (Temp/Humid/Press)";
+#elif defined(USE_BMP280)
+    sensorInfo += " (Temp/Press)";
+#elif defined(USE_BMP180)
+    sensorInfo += " (Temp/Press)";
 #else
     sensorInfo += " (Temp/Humid)";
 #endif
@@ -1318,7 +1457,7 @@ static void handlePostConfig() {
     uint8_t oldClockMode = cfg.clockMode;
     uint8_t newClockMode = (uint8_t)constrain(doc["clockMode"].as<int>(), 0, TOTAL_CLOCK_MODES - 1);
     if (oldClockMode != newClockMode) {
-      const char* modes[] = {"7-Segment", "Tetris"};
+      const char* modes[] = {"Morphing", "Tetris"};
       DBG_INFO("  [%s] Clock mode changed: %s -> %s\n", clientIP.c_str(),
                modes[oldClockMode], modes[newClockMode]);
       switchClockMode(newClockMode);  // Use fade transition
@@ -1782,6 +1921,10 @@ static void drawFrameTetris() {
 
   fbClear(0);  // Clear framebuffer
 
+  // Get the 24-hour format hour for AM/PM determination
+  int hour24 = (currT[0] - '0') * 10 + (currT[1] - '0');
+  bool isPM = (hour24 >= 12);
+
   // Format time string based on 12/24 hour preference
   String timeStr;
   if (cfg.use24h) {
@@ -1790,7 +1933,7 @@ static void drawFrameTetris() {
               String(currT[2]) + String(currT[3]);
   } else {
     // 12-hour format: " H:MM" or "HH:MM" (space-padded for single digit hours)
-    int hour = (currT[0] - '0') * 10 + (currT[1] - '0');
+    int hour = hour24;
     if (hour == 0) hour = 12;  // Midnight is 12 AM
     else if (hour > 12) hour -= 12;  // Convert to 12-hour
 
@@ -1803,7 +1946,7 @@ static void drawFrameTetris() {
 
   // Update Tetris clock (handles animation internally)
   // Returns true when animation is complete, false while animating
-  tetrisClock->update(timeStr, cfg.use24h, clockColon);
+  tetrisClock->update(timeStr, cfg.use24h, clockColon, isPM);
 }
 
 
@@ -1949,7 +2092,7 @@ static bool modeNeedsAnimation() {
 // =========================
 
 static int startupY = 10;  // Current Y position for startup text
-static const int startupLineHeight = 20;  // Line height for startup messages
+static const int startupLineHeight = 18;  // Line height for startup messages (Font 2: 16px height)
 
 /**
  * Initialize the startup display
@@ -1959,17 +2102,17 @@ static void initStartupDisplay() {
   tft.setRotation(1);  // Landscape orientation for ESP32 Touchdown
   tft.fillScreen(TFT_BLACK);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.setTextSize(2);
+  tft.setTextFont(2);  // Font 2 (16px height) - good middle ground between size 1 and 2
   startupY = 10;
 
   // Title
   tft.setTextColor(TFT_CYAN, TFT_BLACK);
   tft.drawString("ESP32 TOUCHDOWN RETRO CLOCK", 10, startupY);
-  startupY += startupLineHeight + 5;
+  startupY += startupLineHeight;
 
   tft.setTextColor(TFT_YELLOW, TFT_BLACK);
   tft.drawString("Firmware v" FIRMWARE_VERSION, 10, startupY);
-  startupY += startupLineHeight + 10;
+  startupY += startupLineHeight + 2;
 
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
 }
@@ -1980,10 +2123,10 @@ static void initStartupDisplay() {
  * @param color Text color (default white)
  */
 static void showStartupStep(const char* msg, uint16_t color = TFT_WHITE) {
-  // Check if we need to wrap to top
-  if (startupY > tft.height() - startupLineHeight - 5) {
+  // Check if we need to wrap to top (use more of the screen - 320px height)
+  if (startupY > tft.height() - startupLineHeight - 10) {
     // Simple approach: wrap back to top and clear that area
-    startupY = 50;  // Start below title area
+    startupY = 46;  // Start below title area (reduced to fit more on screen)
 
     // Clear the next 3 lines where we'll write
     tft.fillRect(0, startupY, tft.width(), startupLineHeight * 3, TFT_BLACK);
@@ -2040,19 +2183,14 @@ void setup() {
   char buildInfo[60];
   snprintf(buildInfo, sizeof(buildInfo), "Build: %s %s", __DATE__, __TIME__);
   showStartupStep(buildInfo);
-  delay(500);
 
   // Note: ESP32 Touchdown does not have built-in status LEDs
   // WiFi reset can be handled via web interface or serial commands
   bool resetWiFi = false;
 
-  showStartupStep("Loading bitmaps...");
+  showStartupStep("Loading bitmaps & config...");
   initBitmaps();
-  delay(500);
-
-  showStartupStep("Loading config...");
   loadConfig();
-  delay(500);
 
   // Reset WiFi if button was held during boot
   if (resetWiFi) {
@@ -2065,16 +2203,15 @@ void setup() {
     showStartupStatus("OK", "WiFi reset");
   }
 
-  showStartupStep("Mounting LittleFS...");
+  showStartupStep("Mounting filesystem...");
   DBG_STEP("Mounting LittleFS...");
   if (!LittleFS.begin(true)) {
     DBG_ERR("LittleFS mount failed");
-    showStartupStatus("ERROR", "LittleFS failed");
+    showStartupStatus("ERROR", "FS failed");
   } else {
     DBG_OK("LittleFS mounted");
-    showStartupStatus("OK", "LittleFS mounted");
+    showStartupStatus("OK", "FS mounted");
   }
-  delay(500);
 
   // Apply display settings from config
   showStartupStep("Configuring display...");
@@ -2082,39 +2219,34 @@ void setup() {
   setBacklight(cfg.brightness);
   DBG("TFT size (w x h): %d x %d\n", tft.width(), tft.height());
   DBG_OK("TFT ready.");
-  showStartupStatus("OK", "Display configured");
-  delay(500);
 
-  // Create SMALL sprite for framebuffer rendering (avoid RAM issues)
-  showStartupStep("Creating framebuffer...");
-  DBG_STEP("Creating framebuffer sprite (small)...");
+  // Initialize framebuffer rendering (direct TFT mode - sprite disabled for smooth morphing)
+  showStartupStep("Initializing framebuffer...");
   updateRenderPitch(true);
+
+#if DISABLE_SPRITE_RENDERING
+  DBG_INFO("Using direct TFT rendering (sprite disabled for smooth performance)\n");
+  showStartupStatus("OK", "Direct TFT rendering");
+#else
+  // Sprite rendering mode (currently disabled)
+  DBG_STEP("Creating framebuffer sprite...");
   int sprW = LED_MATRIX_W * fbPitch;
   int sprH = LED_MATRIX_H * fbPitch;
 
   if (useSprite) {
-    int matrixAreaH = tft.height() - STATUS_BAR_H;
-    if (matrixAreaH < sprH) matrixAreaH = tft.height();
-    int x0 = (tft.width()-sprW)/2;
-    int y0 = (matrixAreaH - sprH)/2;
-    tft.fillScreen(TFT_BLACK);
-    spr.pushSprite(x0, y0);
     DBG("Sprite OK: %dx%d\n", sprW, sprH);
     DBG_OK("Sprite ready.");
-    showStartupStatus("OK", "Framebuffer ready");
+    showStartupStatus("OK", "Sprite rendering");
   } else {
-    DBG_WARN("Sprite create FAILED. Falling back to direct draw (may flicker).");
-    showStartupStatus("WARN", "Direct draw mode");
+    DBG_WARN("Sprite create failed, using direct TFT\n");
+    showStartupStatus("WARN", "Direct TFT fallback");
   }
-  delay(500);
+#endif
 
-  // Initialize Tetris Clock
-  showStartupStep("Initializing Tetris...");
+  // Initialize Tetris Clock (silent - no TFT output needed)
   DBG_STEP("Initializing Tetris clock...");
   tetrisClock = new TetrisClock(fb);
   DBG_OK("Tetris clock ready.");
-  showStartupStatus("OK", "Tetris clock ready");
-  delay(500);
 
   // Initialize mode rotation timer
   lastModeRotation = millis();
@@ -2127,10 +2259,6 @@ void setup() {
   showStartupStep("Starting WiFi...");
   startWifi();
 
-  // Pause, clear screen then continue startup sequence
-  delay(5000);
-  tft.fillScreen(TFT_BLACK);
-
   // Sensor
   showStartupStep("Checking sensor...");
   sensorAvailable = testSensor();
@@ -2138,7 +2266,24 @@ void setup() {
     updateSensorData();
     lastSensorUpdate = millis();
     DBG_OK("Sensor initialized and reading.");
-    showStartupStatus("OK", "Sensor detected");
+
+    // Build sensor capabilities string
+    char sensorMsg[80];
+#if defined(USE_BME280)
+    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Humid/Press", sensorType);
+#elif defined(USE_BMP280)
+    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Press", sensorType);
+#elif defined(USE_BMP180)
+    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Press", sensorType);
+#elif defined(USE_SHT3X)
+    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Humid", sensorType);
+#elif defined(USE_HTU21D)
+    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Humid", sensorType);
+#else
+    snprintf(sensorMsg, sizeof(sensorMsg), "%s detected", sensorType);
+#endif
+
+    showStartupStatus("OK", sensorMsg);
   } else {
     DBG_WARN("No sensor detected. Temperature/humidity features disabled.");
     showStartupStatus("WARN", "No sensor");
@@ -2146,17 +2291,13 @@ void setup() {
   delay(500);
 
   // NTP
-  showStartupStep("Starting NTP...");
+  showStartupStep("Starting services...");
   startNtp();
-  delay(500);
 
   // OTA
-  showStartupStep("Starting OTA...");
   startOta();
-  delay(500);
 
   // Web
-  showStartupStep("Starting WebServer...");
   DBG_STEP("Starting WebServer + routes...");
   serveStaticFiles();
   server.on("/api/state", HTTP_GET, handleGetState);
@@ -2164,10 +2305,10 @@ void setup() {
   server.on("/api/mirror", HTTP_GET, handleGetMirror);
   server.on("/api/timezones", HTTP_GET, handleGetTimezones);
   server.on("/api/reset-wifi", HTTP_POST, handleResetWiFi);
+  server.on("/api/reboot", HTTP_POST, handleReboot);
   server.begin();
   DBG_OK("WebServer ready.");
-  showStartupStatus("OK", "WebServer ready");
-  delay(500);
+  showStartupStatus("OK", "NTP/OTA/Web ready");
 
   // Show IP address
   char ipMsg[40];
@@ -2179,11 +2320,9 @@ void setup() {
   }
   DBG("Ready. IP: %s\n", WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "0.0.0.0");
 
-  // Show "Ready" message
-  delay(500);
-  showStartupStep("");
+  // Show "Ready" message (removed empty line to prevent wrap)
   showStartupStatus("READY", "System initialized!");
-  delay(5000);  // Wait before clearing display and starting normal operation
+  delay(3000);  // Pause to allow reading startup messages before clearing
 
   // Clear startup display and start normal operation
   tft.fillScreen(TFT_BLACK);
@@ -2218,7 +2357,7 @@ void loop() {
   bool needsUpdate = false;
 
   if (cfg.clockMode == CLOCK_MODE_7SEG) {
-    // 7-segment mode: update on time change or during morph animation
+    // Morphing mode: update on time change or during morph animation
     needsUpdate = timeChanged || morphStep < MORPH_STEPS;
   } else if (cfg.clockMode == CLOCK_MODE_TETRIS) {
     // Tetris mode: update at controlled interval for visible block animation
