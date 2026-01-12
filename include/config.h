@@ -9,7 +9,7 @@
 // -----------------------------
 
 // ===== FIRMWARE VERSION =====
-#define FIRMWARE_VERSION "2.0.0"
+#define FIRMWARE_VERSION "2.1.0"
 
 // ===== LED MATRIX PANEL EMULATION =====
 // Logical LED grid (single 64x32 panel)
@@ -77,6 +77,19 @@
 
 // Sensor update interval
 #define SENSOR_UPDATE_INTERVAL 60000  // Update sensor every 60 seconds
+
+// ===== CAPACITIVE TOUCH CONTROLLER =====
+// FT6236/FT6206 Touch Controller (shares I2C bus with sensors)
+#define TOUCH_SDA_PIN     21    // I2C Data (same as sensor)
+#define TOUCH_SCL_PIN     22    // I2C Clock (same as sensor)
+#define TOUCH_IRQ_PIN     27    // Touch interrupt pin
+#define TOUCH_I2C_ADDR    0x38  // FT6236/FT6206 I2C address
+
+// Touch settings
+#define ENABLE_TOUCH         1     // Enable touch support (1 = enabled, 0 = disabled)
+#define TOUCH_DEBOUNCE_MS    300   // Debounce time in milliseconds to prevent multiple triggers
+#define TOUCH_LONG_PRESS_MS  3000  // Long press time (3 seconds) to show info pages
+#define TOUCH_INFO_PAGES     2     // Number of info pages (0=User Settings, 1=System Diagnostics)
 
 // Temperature unit
 #define DEFAULT_TEMP_C true

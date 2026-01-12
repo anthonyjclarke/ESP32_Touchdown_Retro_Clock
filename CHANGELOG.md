@@ -5,6 +5,43 @@ All notable changes to the ESP32 Touchdown LED Matrix Retro Clock project will b
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-01-12
+
+### Added - Touch Interface Implementation
+- **Full capacitive touch support** with FT6236/FT6206 controller
+- **Touch-based info pages** accessible via 3-second long press
+  - User Settings page: View all configurable settings
+  - System Diagnostics page: View network, hardware, and system resources
+- **Interactive touch buttons** on info pages
+  - Navigation buttons (< > X) in top-right corner for page control
+  - Flip Display button on User Settings page
+  - Reset WiFi and Reboot buttons on System Diagnostics page
+- **Touch mode switching**: Single tap switches between clock display modes (Morphing ↔ Tetris)
+- **Rotation-aware touch mapping**: Automatically adjusts touch coordinates when display is flipped
+- **Touch calibration support**: Config structure includes touchOffsetX/Y for fine-tuning (infrastructure ready)
+- **Text clipping system**: `drawClippedString()` function prevents text overflow with ellipsis truncation
+
+### Fixed
+- **Text truncation on info pages**: Text datum was not reset after drawing buttons, causing center-aligned text instead of left-aligned
+- **Touch coordinate capture**: Now captures coordinates while finger is down (was returning 0,0 when read after release)
+- **Touch coordinate mapping**: Corrected from 0-240 to 0-480 range for proper 1:1 FT6206 portrait mode mapping
+- **Display flip touch support**: Touch coordinates now properly invert when display is rotated 180°
+- **Delta rendering sync**: fbPrev buffer reset when display is flipped to force full redraw
+- **Status bar disappearing**: Status bar cache now resets when display is cleared
+
+### Changed
+- Touch debounce time: 300ms to prevent multiple triggers
+- Long press threshold: 3 seconds to activate info pages
+- Info page layout: Content area (0-320px) separate from button area (320-480px)
+- Debug output: Enhanced with touch coordinates, rotation state, and calibration offsets
+
+### Technical Details
+- Touch controller initialized on I2C (GPIO21/22) shared with sensors
+- Touch coordinates: FT6206 reports portrait mode (0-320 × 0-480)
+- Mapping for rotation 1 (USB right): touchX = point.y, touchY = 319 - point.x
+- Mapping for rotation 3 (flipped): touchX = 479 - point.y, touchY = point.x
+- Calibration offsets applied after mapping, constrained to screen bounds
+
 ## [2.0.0] - 2026-01-10
 
 ### Major Breaking Changes (Hardware Migration)

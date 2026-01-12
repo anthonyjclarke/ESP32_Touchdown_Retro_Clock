@@ -1,7 +1,7 @@
 # ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock
 
 <!-- Note: Update version badge below when FIRMWARE_VERSION changes in include/config.h -->
-![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32%20Touchdown-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 ![LED Type](https://img.shields.io/badge/LED-HUB75%20RGB-red.svg)
@@ -11,9 +11,27 @@ A retro-style RGB LED Matrix (HUB75) clock for the **ESP32 Touchdown** that emul
 
 ![LED Panel Example](images/LEDMatrix_example.jpg)
 
-Clock Example Display
+## Clock Display Modes
 
-![Clock Display](images/Display1_anim.gif)
+The clock offers multiple display styles that you can select via the web interface or configure to automatically cycle through:
+
+### Morphing (Classic) Mode
+Smooth LED digit morphing animations based on [Morphing Clock](https://github.com/hwiguna/HariFun_166_Morphing_Clock) by Hari Wiguna (HariFun).
+
+![Morphing Clock](images/Display1_anim.gif)
+
+### Tetris Animation Mode
+Animated Tetris blocks fall into place to form time digits using [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum (toblum).
+
+![Tetris Clock](images/tetris_clock_placeholder.gif)
+*Note: Upload your own Tetris clock screenshot/animation here*
+
+### Mode Selection
+- **Manual Selection**: Choose your preferred clock mode from the web interface
+- **Auto-Cycle**: Enable automatic rotation through all clock modes
+- **Configurable Interval**: Set how long to display each mode (1-60 minutes) before cycling to the next
+
+More clock modes coming soon: Analog, Binary, Word Clock, and more!
 
 ## Features
 
@@ -39,7 +57,19 @@ Clock Example Display
 - **Web-based configuration** interface accessible from any browser
 - **OTA firmware updates** for easy maintenance
 - **Live display mirror** in web UI showing real-time framebuffer
-- **Capacitive touch display** (FT62x6 controller) - future touch UI support
+
+### Touch Interface
+- **Capacitive touch support** (FT6236/FT6206 controller)
+- **Rotation-aware touch mapping**: Automatically adjusts touch coordinates when display is flipped
+- **Calibration support**: Fine-tune touch accuracy with X/Y offset adjustments
+- **Single tap**: Switch between clock display modes (Morphing ↔ Tetris)
+- **Long press (3 seconds)**: Display on-screen settings and diagnostics
+  - **User Settings Page**: View all configurable settings (clock mode, time format, LED appearance, etc.)
+    - **Interactive "Flip Display" button**: Rotate display 180° directly from touch screen
+  - **System Diagnostics Page**: View network status, hardware info, system resources, uptime
+    - **Interactive "Reset WiFi" button**: Clear credentials and restart in AP mode
+    - **Interactive "Reboot" button**: Restart the device
+  - **Page navigation buttons**: < > buttons to navigate between pages, X button to exit back to clock
 
 ### Configuration
 - **Clock Display Mode**: Choose between Morphing (Classic), Tetris, or enable auto-rotation
@@ -195,7 +225,15 @@ On first boot, the device will create a WiFi access point:
 ### Web Interface
 Access the web interface at `http://<device-ip>` to configure:
 
-- **Display Mirror**: Live view of the 64×32 RGB LED Matrix (HUB75) framebuffer
+**Display Mirror**
+- Live view of the 64×32 RGB LED Matrix (HUB75) framebuffer with real-time updates
+
+**Clock Display Mode**
+- **Display Style**: Choose between Morphing (Classic) or Tetris Animation
+- **Mode Switching**: Select Manual or Auto-Cycle
+- **Cycle Interval**: Set rotation interval (1-60 minutes) when auto-cycling is enabled
+
+**Time & Date Settings**
 - **Timezone**: Dropdown selector with 88 timezones organized by 13 geographic regions
   - Africa, Americas, Antarctica, Arctic, Asia, Atlantic, Australia, Europe, Indian, Pacific, USA, UTC, and Etc
 - **NTP Server**: Dropdown selector with 9 preset servers:
@@ -209,10 +247,21 @@ Access the web interface at `http://<device-ip>` to configure:
   - MM/DD/YYYY (US)
   - DD.MM.YYYY (German)
   - Mon DD, YYYY (Verbose, e.g., "Jan 07, 2026")
+- **Temperature Unit**: Celsius (°C) or Fahrenheit (°F)
+
+**LED Appearance**
 - **LED Diameter**: Adjust the size of individual LED dots (1-10 pixels)
 - **LED Gap**: Space between LEDs (0-8 pixels)
 - **LED Color**: Use the color picker to choose any RGB color with instant preview
 - **Brightness**: Adjust backlight brightness (0-255)
+- **Morph Speed**: Adjust animation speed (1-50x) for morphing transitions
+- **Flip Display**: Rotate display 180° for different mounting orientations
+
+**System Controls**
+- **Reset WiFi**: Clear WiFi credentials and restart in configuration mode
+- **Reboot Device**: Restart the ESP32
+
+**Debug Settings**
 - **Debug Level**: Adjust serial logging verbosity at runtime (Off, Error, Warning, Info, Verbose)
 
 ### System Diagnostics Panel
@@ -514,6 +563,14 @@ See `CHANGELOG.md` for planned features:
 - Color schemes and themes
 - Touch screen support
 - MQTT integration
+
+## Documentation
+
+Additional technical documentation is available in the [`/doc`](doc/) folder:
+- [Architecture Overview](doc/ARCHITECTURE.md) - System architecture and design
+- [Codebase Review](doc/CODEBASE_REVIEW.md) - Detailed code analysis
+- [CYD Porting Guide](doc/CYD_PORTING_GUIDE.md) - Migration from ESP32-2432S028
+- [Migration Notes](doc/MIGRATION_NOTES.md) - Version upgrade notes
 
 ## Contributing
 

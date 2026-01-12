@@ -112,6 +112,11 @@
 #include "timezones.h"
 #include "TetrisClock.h"
 
+// Touch controller library
+#if ENABLE_TOUCH
+  #include <Adafruit_FT6206.h>
+#endif
+
 // Sensor libraries (only one will be used based on config.h)
 #ifdef USE_BME280
   #include <Adafruit_BME280.h>
@@ -191,6 +196,17 @@ TFT_eSPI tft = TFT_eSPI();
 WebServer server(HTTP_PORT);
 Preferences prefs;
 
+// Touch controller object
+#if ENABLE_TOUCH
+  Adafruit_FT6206 touch = Adafruit_FT6206();
+  unsigned long lastTouchTime = 0;      // For touch debouncing
+  unsigned long touchStartTime = 0;     // When touch began
+  bool touchHeld = false;               // Is touch being held down
+  bool infoPageActive = false;          // Is info page currently displayed
+  uint8_t infoPageNum = 0;              // Current info page (0=settings, 1=diagnostics)
+  TS_Point lastTouchPoint;              // Store touch point while finger is down
+#endif
+
 // Sensor objects (only one will be initialized based on configuration)
 #ifdef USE_BME280
   Adafruit_BME280 bme280;
@@ -233,6 +249,10 @@ struct AppConfig {
 
   // Sensor settings
   bool useFahrenheit = false;   // false=Celsius, true=Fahrenheit
+
+  // Touch calibration offsets (for fine-tuning touch coordinate mapping)
+  int16_t touchOffsetX = 0;     // X offset adjustment (-50 to +50)
+  int16_t touchOffsetY = 0;     // Y offset adjustment (-50 to +50)
 };
 
 AppConfig cfg;
@@ -457,6 +477,19 @@ static void updateRenderPitch(bool force = false) {
   fbPitch = pitch;
 }
 
+// Forward declaration
+static void drawStatusBar();
+
+static bool g_forceStatusBarRedraw = false;
+
+/**
+ * Reset status bar state to force redraw on next call
+ * Used when display is cleared or flipped
+ */
+static void resetStatusBar() {
+  g_forceStatusBarRedraw = true;
+}
+
 static void drawStatusBar() {
 #if STATUS_BAR_H > 0
   static uint32_t lastDrawMs = 0;
@@ -499,11 +532,14 @@ static void drawStatusBar() {
 
   uint32_t now = millis();
   bool changed = (strncmp(line1, lastLine1, sizeof(line1)) != 0) ||
-                 (strncmp(line2, lastLine2, sizeof(line2)) != 0);
+                 (strncmp(line2, lastLine2, sizeof(line2)) != 0) ||
+                 g_forceStatusBarRedraw;
 
   // Only redraw if content actually changed (prevents flashing every second)
   if (!changed) return;
 
+  // Clear force flag and update cache
+  g_forceStatusBarRedraw = false;
   strlcpy(lastLine1, line1, sizeof(lastLine1));
   strlcpy(lastLine2, line2, sizeof(lastLine2));
   lastDrawMs = now;
@@ -679,6 +715,518 @@ static void applyDisplayRotation() {
   tft.setRotation(rotation);
   DBG_VERBOSE("Display rotation set to %d (%s)\n", rotation, cfg.flipDisplay ? "flipped" : "normal");
 }
+
+// =========================
+// Touch Controller Functions
+// =========================
+#if ENABLE_TOUCH
+/**
+ * Initialize capacitive touch controller (FT6236/FT6206)
+ * Shares I2C bus with sensors on GPIO21/GPIO22
+ * @return true if touch controller initialized successfully, false otherwise
+ */
+static bool initTouch() {
+  DBG_STEP("Initializing touch controller...");
+
+  // Wire.begin() is called in testSensor() - touch shares same I2C bus
+  // If no sensor, we need to initialize Wire here
+  #if !defined(USE_SENSOR)
+    Wire.begin(TOUCH_SDA_PIN, TOUCH_SCL_PIN);
+  #endif
+
+  if (!touch.begin(TOUCH_I2C_ADDR, &Wire)) {
+    DBG_WARN("Touch controller (FT6236/FT6206) not found at address 0x%02X\n", TOUCH_I2C_ADDR);
+    return false;
+  }
+
+  // Read touch controller info for diagnostics
+  uint8_t vendorID = 0, chipID = 0;
+  Wire.beginTransmission(TOUCH_I2C_ADDR);
+  Wire.write(0xA8);  // Vendor ID register
+  Wire.endTransmission();
+  Wire.requestFrom(TOUCH_I2C_ADDR, 1);
+  if (Wire.available()) vendorID = Wire.read();
+
+  Wire.beginTransmission(TOUCH_I2C_ADDR);
+  Wire.write(0xA3);  // Chip ID register
+  Wire.endTransmission();
+  Wire.requestFrom(TOUCH_I2C_ADDR, 1);
+  if (Wire.available()) chipID = Wire.read();
+
+  DBG_INFO("✓ Touch controller initialized - Vendor:0x%02X Chip:0x%02X\n", vendorID, chipID);
+  return true;
+}
+
+/**
+ * Simple button structure for touch areas
+ */
+struct Button {
+  int x, y, w, h;
+  const char* label;
+  uint16_t color;
+};
+
+// Navigation buttons (top right corner)
+static Button btnPrev = {330, 5, 45, 30, "<", TFT_DARKGREY};      // Previous page
+static Button btnNext = {380, 5, 45, 30, ">", TFT_DARKGREY};      // Next page
+static Button btnClose = {430, 5, 45, 30, "X", TFT_RED};          // Close/Exit
+
+// Action buttons for User Settings page (right side, below nav)
+static Button btnFlipDisplay = {330, 80, 140, 45, "Flip", TFT_ORANGE};
+
+// Action buttons for System Diagnostics page (right side, below nav)
+static Button btnResetWiFi = {330, 80, 140, 45, "WiFi", TFT_RED};
+static Button btnReboot = {330, 135, 140, 45, "Reboot", TFT_ORANGE};
+
+/**
+ * Draw a button on the screen
+ */
+static void drawButton(Button& btn, bool pressed = false) {
+  uint16_t bgColor = pressed ? TFT_WHITE : btn.color;
+  uint16_t textColor = pressed ? TFT_BLACK : TFT_WHITE;
+
+  // Draw button background
+  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 5, bgColor);
+
+  // Draw button border
+  tft.drawRoundRect(btn.x, btn.y, btn.w, btn.h, 5, TFT_WHITE);
+
+  // Draw button text (centered)
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(textColor, bgColor);
+  tft.setTextFont(2);
+  tft.drawString(btn.label, btn.x + btn.w/2, btn.y + btn.h/2);
+}
+
+/**
+ * Check if touch point is within button bounds
+ */
+static bool isButtonPressed(Button& btn, int touchX, int touchY) {
+  bool pressed = (touchX >= btn.x && touchX <= (btn.x + btn.w) &&
+                  touchY >= btn.y && touchY <= (btn.y + btn.h));
+  if (pressed) {
+    DBG_INFO("Button '%s' pressed at (%d,%d) within bounds [%d,%d,%d,%d]\n",
+             btn.label, touchX, touchY, btn.x, btn.y, btn.x+btn.w, btn.y+btn.h);
+  }
+  return pressed;
+}
+
+/**
+ * Draw text with automatic truncation if it exceeds maxWidth
+ * Adds "..." to end if truncated
+ */
+static void drawClippedString(const char* text, int x, int y, int maxWidth) {
+  char buf[100];
+  strncpy(buf, text, sizeof(buf) - 1);
+  buf[sizeof(buf) - 1] = '\0';
+
+  // Check if text fits
+  int textW = tft.textWidth(buf);
+  if (textW <= maxWidth) {
+    tft.drawString(buf, x, y);
+    return;
+  }
+
+  // Truncate and add ellipsis
+  int ellipsisW = tft.textWidth("...");
+  int availableW = maxWidth - ellipsisW;
+
+  // Binary search for longest fitting substring
+  int len = strlen(buf);
+  while (len > 0 && tft.textWidth(buf) > availableW) {
+    len--;
+    buf[len] = '\0';
+  }
+
+  strcat(buf, "...");
+  tft.drawString(buf, x, y);
+}
+
+/**
+ * Display User Settings info page
+ * Shows all configurable settings from WebUI
+ */
+static void showUserSettingsPage() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+
+  // Header
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.drawString("USER SETTINGS (1/2)", 10, 10);
+
+  // Navigation buttons (top right)
+  drawButton(btnPrev);
+  drawButton(btnNext);
+  drawButton(btnClose);
+
+  // Divider (stops before buttons)
+  tft.drawFastHLine(0, 40, 320, TFT_DARKGREY);
+
+  // Vertical separator between content and buttons
+  tft.drawFastVLine(320, 0, tft.height(), TFT_DARKGREY);
+
+  int y = 48;  // Start below divider
+  int lineHeight = 18;
+  const int contentWidth = 305;  // Max width for text (320 - 15px margin)
+
+  // Reset text settings after drawing buttons
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+
+  // Clock Mode
+  const char* modes[] = {"Morphing (Classic)", "Tetris Animation"};
+  char buf[100];
+  snprintf(buf, sizeof(buf), "Display: %s", modes[cfg.clockMode]);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  // Mode Switching
+  snprintf(buf, sizeof(buf), "Switching: %s", cfg.autoRotate ? "Auto-Cycle" : "Manual");
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  if (cfg.autoRotate) {
+    snprintf(buf, sizeof(buf), "Interval: %d min", cfg.rotateInterval);
+    drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+  }
+
+  y += 5;  // Spacing
+
+  // Time Settings
+  drawClippedString("TIME & DATE", 10, y, contentWidth); y += lineHeight;
+  snprintf(buf, sizeof(buf), "  Format: %s", cfg.use24h ? "24-hour" : "12-hour");
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  const char* dateFormats[] = {"YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY", "Mon DD, YYYY"};
+  snprintf(buf, sizeof(buf), "  Date: %s", dateFormats[cfg.dateFormat]);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Timezone: %s", cfg.tz);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Temp Unit: %s", cfg.useFahrenheit ? "Fahrenheit" : "Celsius");
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  y += 5;  // Spacing
+
+  // LED Appearance
+  drawClippedString("LED APPEARANCE", 10, y, contentWidth); y += lineHeight;
+  snprintf(buf, sizeof(buf), "  Diameter: %d px", cfg.ledDiameter);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Gap: %d px", cfg.ledGap);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Color: RGB #%04X", cfg.ledColor);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Brightness: %d", cfg.brightness);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Morph Speed: %dx", cfg.morphSpeed);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Display Flip: %s", cfg.flipDisplay ? "180\xF7" : "Normal");  // 0xF7 = degree symbol
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  // Action Button (right side)
+  drawButton(btnFlipDisplay);
+}
+
+/**
+ * Display System Diagnostics info page
+ * Shows system status and diagnostics
+ */
+static void showDiagnosticsPage() {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextDatum(TL_DATUM);
+
+  // Header
+  tft.setTextColor(TFT_CYAN, TFT_BLACK);
+  tft.setTextFont(2);
+  tft.drawString("SYSTEM DIAGNOSTICS (2/2)", 10, 10);
+
+  // Navigation buttons (top right)
+  drawButton(btnPrev);
+  drawButton(btnNext);
+  drawButton(btnClose);
+
+  // Divider (stops before buttons)
+  tft.drawFastHLine(0, 40, 320, TFT_DARKGREY);
+
+  // Vertical separator between content and buttons
+  tft.drawFastVLine(320, 0, tft.height(), TFT_DARKGREY);
+
+  int y = 48;  // Start below divider
+  int lineHeight = 18;
+  const int contentWidth = 305;  // Max width for text (320 - 15px margin)
+
+  // Reset text settings after drawing buttons
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextFont(2);
+  char buf[100];
+
+  // Network
+  drawClippedString("NETWORK", 10, y, contentWidth); y += lineHeight;
+  snprintf(buf, sizeof(buf), "  WiFi: %s", WiFi.SSID().c_str());
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  IP: %s", WiFi.localIP().toString().c_str());
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Signal: %d dBm", WiFi.RSSI());
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  y += 5;  // Spacing
+
+  // Hardware
+  drawClippedString("HARDWARE", 10, y, contentWidth); y += lineHeight;
+  snprintf(buf, sizeof(buf), "  Board: ESP32 Touchdown");
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Display: 480x320 ILI9488");
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  if (sensorAvailable) {
+    snprintf(buf, sizeof(buf), "  Sensor: %s", sensorType);
+    drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+  }
+
+  y += 5;  // Spacing
+
+  // System Resources
+  drawClippedString("SYSTEM RESOURCES", 10, y, contentWidth); y += lineHeight;
+
+  unsigned long uptimeSec = millis() / 1000;
+  int days = uptimeSec / 86400;
+  int hours = (uptimeSec % 86400) / 3600;
+  int mins = (uptimeSec % 3600) / 60;
+  snprintf(buf, sizeof(buf), "  Uptime: %dd %dh %dm", days, hours, mins);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  uint32_t freeHeap = ESP.getFreeHeap();
+  uint32_t heapSize = ESP.getHeapSize();
+  snprintf(buf, sizeof(buf), "  Free Heap: %d KB", freeHeap / 1024);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  CPU: %d MHz", ESP.getCpuFreqMHz());
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  snprintf(buf, sizeof(buf), "  Firmware: v%s", FIRMWARE_VERSION);
+  drawClippedString(buf, 10, y, contentWidth); y += lineHeight;
+
+  // Action Buttons (right side)
+  drawButton(btnResetWiFi);
+  drawButton(btnReboot);
+}
+
+/**
+ * Check for touch events:
+ * - When info pages active: Navigation buttons (< > X) or action buttons
+ * - When clock active: Long press (3s) shows info pages, short tap switches mode
+ * Implements debouncing to prevent multiple triggers
+ */
+static void handleTouch() {
+  bool isTouched = touch.touched();
+  unsigned long now = millis();
+
+  if (isTouched) {
+    // Touch is currently active - capture coordinates NOW while finger is down
+    lastTouchPoint = touch.getPoint();
+
+    if (!touchHeld) {
+      // Touch just started
+      touchStartTime = now;
+      touchHeld = true;
+      DBG_INFO("Touch started at raw(x=%d,y=%d)\n", lastTouchPoint.x, lastTouchPoint.y);
+    } else {
+      // Touch is being held - check if it's a long press (only when info page not active)
+      if (!infoPageActive && (now - touchStartTime >= TOUCH_LONG_PRESS_MS)) {
+        // Long press detected - show info page
+        DBG_INFO("Long press detected - showing info pages\n");
+        infoPageActive = true;
+        infoPageNum = 0;  // Start with User Settings page
+        showUserSettingsPage();
+        touchStartTime = now;  // Reset for debouncing
+      }
+    }
+  } else {
+    // Touch released
+    if (touchHeld) {
+      unsigned long pressDuration = now - touchStartTime;
+
+      // Debounce check
+      if (now - lastTouchTime < TOUCH_DEBOUNCE_MS) {
+        touchHeld = false;
+        return;
+      }
+
+      lastTouchTime = now;
+      touchHeld = false;
+
+      if (infoPageActive) {
+        // Info page is active - check for button presses using stored touch point
+        TS_Point point = lastTouchPoint;
+
+        // Map touch coordinates to screen coordinates
+        // FT6206 reports in portrait mode (0-320 x 0-480)
+        // Display is 480x320 in landscape mode
+        //
+        // Calibration data from testing:
+        // X button at screen(430-475, 5-35) -> raw touch(303, 476)
+        // This confirms: touchY -> screenX, touchX -> screenY (inverted)
+
+        int touchX, touchY;
+
+        if (cfg.flipDisplay) {
+          // Rotation 3 (display flipped 180°)
+          // Touch coordinates are inverted in both axes
+          touchX = map(point.y, 0, 480, 479, 0);  // Touch Y -> Screen X (inverted)
+          touchY = map(point.x, 0, 320, 0, 319);  // Touch X -> Screen Y (normal)
+        } else {
+          // Rotation 1 (normal landscape, USB on right)
+          touchX = map(point.y, 0, 480, 0, 479);  // Touch Y -> Screen X (1:1 mapping)
+          touchY = map(point.x, 0, 320, 319, 0);  // Touch X -> Screen Y (inverted)
+        }
+
+        // Apply calibration offsets
+        touchX += cfg.touchOffsetX;
+        touchY += cfg.touchOffsetY;
+
+        // Constrain to screen bounds
+        touchX = constrain(touchX, 0, 479);
+        touchY = constrain(touchY, 0, 319);
+
+        DBG_INFO("Touch raw(x=%d,y=%d) -> screen(x=%d,y=%d) [flip=%d, offset=%d,%d]\n",
+                 point.x, point.y, touchX, touchY, cfg.flipDisplay, cfg.touchOffsetX, cfg.touchOffsetY);
+
+        // Check navigation buttons first (always available)
+        if (isButtonPressed(btnClose, touchX, touchY)) {
+          // X button - exit info pages and return to clock
+          DBG_INFO("Close button pressed - exiting info pages\n");
+          drawButton(btnClose, true);
+          delay(150);
+          infoPageActive = false;
+          tft.fillScreen(TFT_BLACK);
+          memset(fbPrev, 0, sizeof(fbPrev));  // Force full redraw
+          resetStatusBar();
+          return;
+        }
+
+        if (isButtonPressed(btnPrev, touchX, touchY)) {
+          // < button - previous page
+          DBG_INFO("Previous button pressed\n");
+          drawButton(btnPrev, true);
+          delay(150);
+          infoPageNum = (infoPageNum == 0) ? (TOUCH_INFO_PAGES - 1) : (infoPageNum - 1);
+          DBG_INFO("Switching to info page %d\n", infoPageNum);
+
+          if (infoPageNum == 0) {
+            showUserSettingsPage();
+          } else if (infoPageNum == 1) {
+            showDiagnosticsPage();
+          }
+          return;
+        }
+
+        if (isButtonPressed(btnNext, touchX, touchY)) {
+          // > button - next page
+          DBG_INFO("Next button pressed\n");
+          drawButton(btnNext, true);
+          delay(150);
+          infoPageNum = (infoPageNum + 1) % TOUCH_INFO_PAGES;
+          DBG_INFO("Switching to info page %d\n", infoPageNum);
+
+          if (infoPageNum == 0) {
+            showUserSettingsPage();
+          } else if (infoPageNum == 1) {
+            showDiagnosticsPage();
+          }
+          return;
+        }
+
+        // Check action buttons based on current page
+        if (infoPageNum == 0) {
+          // User Settings page - check Flip Display button
+          if (isButtonPressed(btnFlipDisplay, touchX, touchY)) {
+            DBG_INFO("Flip Display button pressed\n");
+            drawButton(btnFlipDisplay, true);
+            delay(200);
+
+            // Toggle flip display
+            cfg.flipDisplay = !cfg.flipDisplay;
+            saveConfig();
+            applyDisplayRotation();
+            tft.fillScreen(TFT_BLACK);
+            memset(fbPrev, 0, sizeof(fbPrev));
+            resetStatusBar();
+            showUserSettingsPage();  // Refresh page with new value
+            return;
+          }
+        } else if (infoPageNum == 1) {
+          // System Diagnostics page - check Reset WiFi and Reboot buttons
+          if (isButtonPressed(btnResetWiFi, touchX, touchY)) {
+            DBG_INFO("Reset WiFi button pressed\n");
+            drawButton(btnResetWiFi, true);
+            delay(200);
+
+            // Reset WiFi credentials and restart
+            DBG_OK("Resetting WiFi credentials via info page...");
+            prefs.begin("nvs", false);
+            prefs.clear();
+            prefs.end();
+
+            tft.fillScreen(TFT_BLACK);
+            tft.setTextColor(TFT_RED, TFT_BLACK);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextFont(4);
+            tft.drawString("WiFi Reset", tft.width()/2, tft.height()/2 - 20);
+            tft.setTextFont(2);
+            tft.drawString("Restarting...", tft.width()/2, tft.height()/2 + 20);
+            delay(2000);
+            ESP.restart();
+            return;
+          }
+
+          if (isButtonPressed(btnReboot, touchX, touchY)) {
+            DBG_INFO("Reboot button pressed\n");
+            drawButton(btnReboot, true);
+            delay(200);
+
+            // Reboot device
+            DBG_OK("Rebooting device via info page...");
+            tft.fillScreen(TFT_BLACK);
+            tft.setTextColor(TFT_ORANGE, TFT_BLACK);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextFont(4);
+            tft.drawString("Rebooting", tft.width()/2, tft.height()/2 - 20);
+            tft.setTextFont(2);
+            tft.drawString("Please wait...", tft.width()/2, tft.height()/2 + 20);
+            delay(1000);
+            ESP.restart();
+            return;
+          }
+        }
+      } else {
+        // Clock is active - long press shows info, short tap switches mode
+        if (pressDuration < TOUCH_LONG_PRESS_MS) {
+          // Short tap - switch to next clock mode
+          uint8_t nextMode = (cfg.clockMode + 1) % TOTAL_CLOCK_MODES;
+          DBG_INFO("Touch - switching to clock mode %d\n", nextMode);
+
+          switchClockMode(nextMode);
+
+          // If auto-rotate is enabled, reset the timer
+          if (cfg.autoRotate) {
+            lastModeRotation = now;
+          }
+        }
+      }
+    }
+  }
+}
+#endif
 
 // =========================
 // Sensor Functions
@@ -1306,6 +1854,8 @@ static void handlePostConfig() {
                cfg.flipDisplay ? "flipped" : "normal");
       applyDisplayRotation();  // Apply rotation immediately
       tft.fillScreen(TFT_BLACK);  // Clear screen after rotation change
+      memset(fbPrev, 0, sizeof(fbPrev));  // Reset delta buffer to force full redraw
+      resetStatusBar();  // Force status bar redraw
     }
   }
 
@@ -2158,6 +2708,18 @@ void setup() {
   }
   delay(500);
 
+  // Touch Controller
+#if ENABLE_TOUCH
+  showStartupStep("Initializing touch...");
+  bool touchAvailable = initTouch();
+  if (touchAvailable) {
+    showStartupStatus("OK", "Touch enabled");
+  } else {
+    showStartupStatus("WARN", "Touch not found");
+  }
+  delay(500);
+#endif
+
   // NTP
   showStartupStep("Starting services...");
   startNtp();
@@ -2194,6 +2756,8 @@ void setup() {
 
   // Clear startup display and start normal operation
   tft.fillScreen(TFT_BLACK);
+  memset(fbPrev, 0, sizeof(fbPrev));  // Initialize delta buffer for clean first frame
+  resetStatusBar();  // Force status bar to draw on first frame
 }
 
 void loop() {
@@ -2211,11 +2775,23 @@ void loop() {
   // Check auto-rotation timer
   checkAutoRotation();
 
+  // Handle touch input
+#if ENABLE_TOUCH
+  handleTouch();
+#endif
+
   // Toggle colon blink every second (for Tetris mode)
   if (now - lastColonToggle >= 1000) {
     clockColon = !clockColon;
     lastColonToggle = now;
   }
+
+  // Skip clock rendering if info page is active
+#if ENABLE_TOUCH
+  if (infoPageActive) {
+    return;  // Info page is displayed, don't render clock
+  }
+#endif
 
   // Update clock logic only on second change (once per second)
   // This is where we detect time changes

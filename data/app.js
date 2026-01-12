@@ -134,13 +134,10 @@ async function setControls(state) {
       html += `<div class="status-item"><span class="k">Pressure</span> <span id="pressure">${state.pressure} hPa</span></div>`;
     }
 
-    html += `<div class="status-item"><span class="k">Sensor</span> <span id="sensorType">${state.sensorType || "Unknown"}</span></div>`;
-
     envReadings.innerHTML = html;
   } else {
     envReadings.innerHTML = `
       <div class="status-item"><span class="k">Temperature</span> <span>--</span></div>
-      <div class="status-item"><span class="k">Sensor</span> <span>Not detected</span></div>
     `;
   }
 
