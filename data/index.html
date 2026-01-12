@@ -35,7 +35,54 @@
     </section>
 
     <section class="card">
-      <h2>Config</h2>
+      <h2>Clock Settings</h2>
+      <div class="grid">
+        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">Display Mode</h3>
+
+        <label>Display Style
+          <select id="clockMode">
+            <option value="0">Morphing (Classic)</option>
+            <option value="1">Tetris Animation</option>
+          </select>
+        </label>
+
+        <label>Mode Switching
+          <select id="autoRotate">
+            <option value="false">Manual</option>
+            <option value="true">Auto-Cycle</option>
+          </select>
+        </label>
+
+        <label>Cycle Interval (min)
+          <input id="rotateInterval" type="number" min="1" max="60" value="5">
+        </label>
+
+        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">LED Appearance</h3>
+
+        <label>LED diameter (px)
+          <input id="ledd" type="number" min="1" max="10">
+        </label>
+        <label>LED gap (px)
+          <input id="ledg" type="number" min="0" max="8">
+        </label>
+        <label>LED color
+          <input id="col" type="color" value="#ff0000">
+        </label>
+        <label>Brightness (0-255)
+          <input id="bl" type="number" min="0" max="255">
+        </label>
+        <label>Morph Speed (1-50x)
+          <input id="morphSpeed" type="range" min="1" max="50" value="1">
+          <span id="morphSpeedVal">1x</span>
+        </label>
+      </div>
+
+      <button id="save">Save Now</button>
+      <div id="msg" class="msg">Changes apply instantly</div>
+    </section>
+
+    <section class="card">
+      <h2>System Settings</h2>
       <div class="grid">
         <label>Timezone
           <select id="tz">
@@ -76,61 +123,19 @@
             <option value="true">Fahrenheit (°F)</option>
           </select>
         </label>
-
-        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">Clock Display Mode</h3>
-
-        <label>Display Style
-          <select id="clockMode">
-            <option value="0">Morphing (Classic)</option>
-            <option value="1">Tetris Animation</option>
-          </select>
-        </label>
-
-        <label>Mode Switching
-          <select id="autoRotate">
-            <option value="false">Manual</option>
-            <option value="true">Auto-Cycle</option>
-          </select>
-        </label>
-
-        <label>Cycle Interval (min)
-          <input id="rotateInterval" type="number" min="1" max="60" value="5">
-        </label>
-
-        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">LED Appearance</h3>
-
-        <label>LED diameter (px)
-          <input id="ledd" type="number" min="1" max="10">
-        </label>
-        <label>LED gap (px)
-          <input id="ledg" type="number" min="0" max="8">
-        </label>
-        <label>LED color
-          <input id="col" type="color" value="#ff0000">
-        </label>
-        <label>Brightness (0-255)
-          <input id="bl" type="number" min="0" max="255">
-        </label>
-        <label>Morph Speed (1-50x)
-          <input id="morphSpeed" type="range" min="1" max="50" value="1">
-          <span id="morphSpeedVal">1x</span>
-        </label>
-
-        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #1b2330; display: flex; flex-direction: column; gap: 8px;">
-          <button id="flipBtn" style="width: 100%; padding: 10px; font-size: 14px; background: #1a3a52; border: 1px solid #2a5a82; color: #8ef1ff; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
-            🔄 Flip Display
-          </button>
-          <button id="resetWifiBtn" style="width: 100%; padding: 10px; font-size: 14px; background: #521a1a; border: 1px solid #822a2a; color: #ffb3b3; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
-            📶 Reset WiFi
-          </button>
-          <button id="rebootBtn" style="width: 100%; padding: 10px; font-size: 14px; background: #52391a; border: 1px solid #82592a; color: #ffd9b3; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
-            🔌 Reboot Device
-          </button>
-        </div>
       </div>
 
-      <button id="save">Save Now</button>
-      <div id="msg" class="msg">Changes apply instantly</div>
+      <div style="margin-top: 16px; display: flex; flex-wrap: nowrap; gap: 8px;">
+        <button id="flipBtn" style="flex: 1; padding: 12px; font-size: 14px; background: #1a3a52; border: 1px solid #2a5a82; color: #8ef1ff; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
+          🔄 Flip Display
+        </button>
+        <button id="resetWifiBtn" style="flex: 1; padding: 12px; font-size: 14px; background: #521a1a; border: 1px solid #822a2a; color: #ffb3b3; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
+          📶 Reset WiFi
+        </button>
+        <button id="rebootBtn" style="flex: 1; padding: 12px; font-size: 14px; background: #52391a; border: 1px solid #82592a; color: #ffd9b3; cursor: pointer; border-radius: 6px; transition: all 0.2s;">
+          🔌 Reboot Device
+        </button>
+      </div>
     </section>
 
     <section class="card">

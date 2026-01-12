@@ -16,6 +16,12 @@ This folder contains supplementary documentation for the ESP32 Touchdown Retro C
   - Function documentation
   - Implementation details
 
+- **[PARTITIONING_GUIDE.md](PARTITIONING_GUIDE.md)** - ESP32 flash memory partitioning guide
+  - Current memory usage analysis
+  - Flash memory layout explanation
+  - Repartitioning options and procedures
+  - Custom partition schemes
+
 ## Migration Guides
 
 - **[CYD_PORTING_GUIDE.md](CYD_PORTING_GUIDE.md)** - Guide for porting from ESP32-2432S028 (CYD)

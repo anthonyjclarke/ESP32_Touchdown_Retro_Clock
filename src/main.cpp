@@ -201,10 +201,13 @@ Preferences prefs;
   Adafruit_FT6206 touch = Adafruit_FT6206();
   unsigned long lastTouchTime = 0;      // For touch debouncing
   unsigned long touchStartTime = 0;     // When touch began
+  unsigned long infoPageStartTime = 0;  // When info page was activated
   bool touchHeld = false;               // Is touch being held down
   bool infoPageActive = false;          // Is info page currently displayed
   uint8_t infoPageNum = 0;              // Current info page (0=settings, 1=diagnostics)
   TS_Point lastTouchPoint;              // Store touch point while finger is down
+
+  #define INFO_PAGE_TIMEOUT_MS 30000    // Auto-exit info pages after 30s of inactivity
 #endif
 
 // Sensor objects (only one will be initialized based on configuration)
@@ -284,6 +287,7 @@ unsigned long lastColonToggle = 0;   // Last colon toggle time
 uint8_t fadeLevel = 255;             // Current fade level (0-255) for mode transitions
 bool inTransition = false;           // True during mode transition fade
 unsigned long lastTetrisUpdate = 0;  // Last Tetris animation update time
+bool firstRender = true;             // Force initial render after boot
 
 // Forward declarations
 static void switchClockMode(uint8_t newMode);
@@ -767,9 +771,9 @@ struct Button {
 };
 
 // Navigation buttons (top right corner)
-static Button btnPrev = {330, 5, 45, 30, "<", TFT_DARKGREY};      // Previous page
-static Button btnNext = {380, 5, 45, 30, ">", TFT_DARKGREY};      // Next page
-static Button btnClose = {430, 5, 45, 30, "X", TFT_RED};          // Close/Exit
+static Button btnPrev = {330, 5, 45, 60, "<", TFT_DARKGREY};      // Previous page
+static Button btnNext = {380, 5, 45, 60, ">", TFT_DARKGREY};      // Next page
+static Button btnClose = {430, 5, 45, 60, "X", TFT_RED};          // Close/Exit
 
 // Action buttons for User Settings page (right side, below nav)
 static Button btnFlipDisplay = {330, 80, 140, 45, "Flip", TFT_ORANGE};
@@ -1031,12 +1035,20 @@ static void handleTouch() {
   bool isTouched = touch.touched();
   unsigned long now = millis();
 
-  if (isTouched) {
-    // Touch is currently active - capture coordinates NOW while finger is down
-    lastTouchPoint = touch.getPoint();
+  // Check for info page timeout (30s of inactivity)
+  if (infoPageActive && (now - infoPageStartTime >= INFO_PAGE_TIMEOUT_MS)) {
+    DBG_INFO("Info page timeout - returning to clock display\n");
+    infoPageActive = false;
+    tft.fillScreen(TFT_BLACK);
+    memset(fbPrev, 0, sizeof(fbPrev));  // Force full redraw
+    resetStatusBar();
+    return;
+  }
 
+  if (isTouched) {
     if (!touchHeld) {
-      // Touch just started
+      // Touch just started - capture coordinates NOW while finger is down
+      lastTouchPoint = touch.getPoint();
       touchStartTime = now;
       touchHeld = true;
       DBG_INFO("Touch started at raw(x=%d,y=%d)\n", lastTouchPoint.x, lastTouchPoint.y);
@@ -1047,6 +1059,7 @@ static void handleTouch() {
         DBG_INFO("Long press detected - showing info pages\n");
         infoPageActive = true;
         infoPageNum = 0;  // Start with User Settings page
+        infoPageStartTime = now;  // Start timeout timer
         showUserSettingsPage();
         touchStartTime = now;  // Reset for debouncing
       }
@@ -1067,6 +1080,9 @@ static void handleTouch() {
 
       if (infoPageActive) {
         // Info page is active - check for button presses using stored touch point
+        // Reset timeout timer on any touch interaction
+        infoPageStartTime = now;
+
         TS_Point point = lastTouchPoint;
 
         // Map touch coordinates to screen coordinates
@@ -2579,6 +2595,38 @@ static void showStartupStatus(const char* status, const char* msg) {
   showStartupStep(buffer, statusColor);
 }
 
+/**
+ * Display a startup step with inline status
+ * @param msg Message to display (e.g., "Mounting filesystem...")
+ * @param status Status indicator ("OK", "ERROR", "WARN", etc.)
+ */
+static void showStartupStepWithStatus(const char* msg, const char* status) {
+  uint16_t statusColor = TFT_GREEN;
+
+  if (strcmp(status, "ERROR") == 0 || strcmp(status, "ERR") == 0) {
+    statusColor = TFT_RED;
+  } else if (strcmp(status, "WARN") == 0) {
+    statusColor = TFT_ORANGE;
+  } else if (strcmp(status, "OK") == 0) {
+    statusColor = TFT_GREEN;
+  } else {
+    statusColor = TFT_CYAN;
+  }
+
+  // Draw message in white
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(msg, 10, startupY);
+
+  // Draw status in color on same line
+  char statusBuf[20];
+  snprintf(statusBuf, sizeof(statusBuf), "[%s]", status);
+  tft.setTextColor(statusColor, TFT_BLACK);
+  tft.drawString(statusBuf, tft.textWidth(msg) + 10, startupY);
+
+  startupY += startupLineHeight;
+  yield();  // Feed watchdog after drawing
+}
+
 // =========================
 // Setup / Loop
 // =========================
@@ -2606,9 +2654,9 @@ void setup() {
   // WiFi reset can be handled via web interface or serial commands
   bool resetWiFi = false;
 
-  showStartupStep("Loading bitmaps & config...");
   initBitmaps();
   loadConfig();
+  showStartupStepWithStatus("Loading bitmaps & config... ", "OK");
 
   // Reset WiFi if button was held during boot
   if (resetWiFi) {
@@ -2621,30 +2669,29 @@ void setup() {
     showStartupStatus("OK", "WiFi reset");
   }
 
-  showStartupStep("Mounting filesystem...");
+  // Mount filesystem
   DBG_STEP("Mounting LittleFS...");
   if (!LittleFS.begin(true)) {
     DBG_ERR("LittleFS mount failed");
-    showStartupStatus("ERROR", "FS failed");
+    showStartupStepWithStatus("Mounting filesystem... ", "ERROR");
   } else {
     DBG_OK("LittleFS mounted");
-    showStartupStatus("OK", "FS mounted");
+    showStartupStepWithStatus("Mounting filesystem... ", "OK");
   }
 
   // Apply display settings from config
-  showStartupStep("Configuring display...");
   applyDisplayRotation();  // Apply rotation based on config
   setBacklight(cfg.brightness);
   DBG("TFT size (w x h): %d x %d\n", tft.width(), tft.height());
   DBG_OK("TFT ready.");
+  showStartupStepWithStatus("Configuring display... ", "OK");
 
   // Initialize framebuffer rendering (direct TFT mode - sprite disabled for smooth morphing)
-  showStartupStep("Initializing framebuffer...");
   updateRenderPitch(true);
 
 #if DISABLE_SPRITE_RENDERING
   DBG_INFO("Using direct TFT rendering (sprite disabled for smooth performance)\n");
-  showStartupStatus("OK", "Direct TFT rendering");
+  showStartupStepWithStatus("Initializing framebuffer... ", "OK");
 #else
   // Sprite rendering mode (currently disabled)
   DBG_STEP("Creating framebuffer sprite...");
@@ -2654,10 +2701,10 @@ void setup() {
   if (useSprite) {
     DBG("Sprite OK: %dx%d\n", sprW, sprH);
     DBG_OK("Sprite ready.");
-    showStartupStatus("OK", "Sprite rendering");
+    showStartupStepWithStatus("Initializing framebuffer... ", "OK");
   } else {
     DBG_WARN("Sprite create failed, using direct TFT\n");
-    showStartupStatus("WARN", "Direct TFT fallback");
+    showStartupStepWithStatus("Initializing framebuffer... ", "WARN");
   }
 #endif
 
@@ -2674,60 +2721,37 @@ void setup() {
       cfg.rotateInterval);
 
   // WiFi
-  showStartupStep("Starting WiFi...");
   startWifi();
+  showStartupStepWithStatus("Starting WiFi... ", "OK");
 
   // Sensor
-  showStartupStep("Checking sensor...");
   sensorAvailable = testSensor();
   if (sensorAvailable) {
     updateSensorData();
     lastSensorUpdate = millis();
     DBG_OK("Sensor initialized and reading.");
-
-    // Build sensor capabilities string
-    char sensorMsg[80];
-#if defined(USE_BME280)
-    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Humid/Press", sensorType);
-#elif defined(USE_BMP280)
-    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Press", sensorType);
-#elif defined(USE_BMP180)
-    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Press", sensorType);
-#elif defined(USE_SHT3X)
-    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Humid", sensorType);
-#elif defined(USE_HTU21D)
-    snprintf(sensorMsg, sizeof(sensorMsg), "%s: Temp/Humid", sensorType);
-#else
-    snprintf(sensorMsg, sizeof(sensorMsg), "%s detected", sensorType);
-#endif
-
-    showStartupStatus("OK", sensorMsg);
+    showStartupStepWithStatus("Checking sensor... ", "OK");
   } else {
     DBG_WARN("No sensor detected. Temperature/humidity features disabled.");
-    showStartupStatus("WARN", "No sensor");
+    showStartupStepWithStatus("Checking sensor... ", "WARN");
   }
   delay(500);
 
   // Touch Controller
 #if ENABLE_TOUCH
-  showStartupStep("Initializing touch...");
   bool touchAvailable = initTouch();
   if (touchAvailable) {
-    showStartupStatus("OK", "Touch enabled");
+    showStartupStepWithStatus("Initializing touch... ", "OK");
   } else {
-    showStartupStatus("WARN", "Touch not found");
+    showStartupStepWithStatus("Initializing touch... ", "WARN");
   }
   delay(500);
 #endif
 
-  // NTP
-  showStartupStep("Starting services...");
+  // NTP, OTA, Web
   startNtp();
-
-  // OTA
   startOta();
 
-  // Web
   DBG_STEP("Starting WebServer + routes...");
   serveStaticFiles();
   server.on("/api/state", HTTP_GET, handleGetState);
@@ -2738,15 +2762,15 @@ void setup() {
   server.on("/api/reboot", HTTP_POST, handleReboot);
   server.begin();
   DBG_OK("WebServer ready.");
-  showStartupStatus("OK", "NTP/OTA/Web ready");
+  showStartupStepWithStatus("Starting services... ", "OK");
 
   // Show IP address
-  char ipMsg[40];
+  char ipMsg[50];
   if (WiFi.isConnected()) {
-    snprintf(ipMsg, sizeof(ipMsg), "IP: %s", WiFi.localIP().toString().c_str());
-    showStartupStatus("OK", ipMsg);
+    snprintf(ipMsg, sizeof(ipMsg), "IP: %s ", WiFi.localIP().toString().c_str());
+    showStartupStepWithStatus(ipMsg, "OK");
   } else {
-    showStartupStatus("WARN", "WiFi not connected");
+    showStartupStepWithStatus("IP: Not connected ", "WARN");
   }
   DBG("Ready. IP: %s\n", WiFi.isConnected() ? WiFi.localIP().toString().c_str() : "0.0.0.0");
 
@@ -2799,6 +2823,12 @@ void loop() {
 
   // Determine if display needs update
   bool needsUpdate = false;
+
+  // Force first render after boot
+  if (firstRender) {
+    needsUpdate = true;
+    firstRender = false;
+  }
 
   if (cfg.clockMode == CLOCK_MODE_7SEG) {
     // Morphing mode: update on time change or during morph animation
