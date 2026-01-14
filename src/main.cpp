@@ -7,8 +7,9 @@
  * FEATURES:
  * - 64×32 virtual RGB LED Matrix (HUB75) emulation on 480×320 TFT display
  * - Multiple clock display modes:
- *   - Morphing (Classic): LED digits with smooth morphing animations (based on HariFun's Morphing Clock)
+ *   - Morphing (Classic): LED digits with smooth morphing animations (HariFun)
  *   - Tetris: Animated falling blocks form time digits (TetrisAnimation by toblum)
+ *   - Morphing (Remix): Segment-based morphing with LED-style display (lmirel)
  *   - More modes coming: Analog, Binary, Word Clock, etc.
  * - Clock mode selection and auto-rotation via web interface
  * - WiFi configuration via WiFiManager (AP mode fallback)
@@ -46,6 +47,10 @@
  *   - Uses TetrisAnimation library by Tobias Blum (toblum)
  *   - GitHub: https://github.com/toblum/TetrisAnimation
  *   - Authentic multi-color Tetris blocks (RGB565 framebuffer)
+ * - Morphing (Remix) Mode: Segment-based morphing with LED-style display
+ *   - Based on MorphingClockRemix by lmirel
+ *   - GitHub: https://github.com/lmirel/MorphingClockRemix
+ *   - LED-style digit rendering with smooth segment transitions
  * - Auto-Rotation: Cycle through modes at configurable intervals
  *
  * DISPLAY LAYOUT:
@@ -71,8 +76,10 @@
  * CREDITS & ACKNOWLEDGMENTS:
  * - Hardware: ESP32 Touchdown by Dustin Watts
  *   https://github.com/DustinWatts/esp32-touchdown
- * - Morphing Clock: Morphing Clock by Hari Wiguna (HariFun)
+ * - Morphing Clock (Classic): Morphing Clock by Hari Wiguna (HariFun)
  *   https://github.com/hwiguna/HariFun_166_Morphing_Clock
+ * - Morphing Clock (Remix): MorphingClockRemix by lmirel
+ *   https://github.com/lmirel/MorphingClockRemix
  * - Tetris Animation: TetrisAnimation library by Tobias Blum (toblum)
  *   https://github.com/toblum/TetrisAnimation
  * - TFT Display: TFT_eSPI library by Bodmer
@@ -111,6 +118,7 @@
 #include "config.h"
 #include "timezones.h"
 #include "TetrisClock.h"
+#include "MorphingDigit.h"
 
 // Touch controller library
 #if ENABLE_TOUCH
@@ -133,6 +141,7 @@
 #ifdef USE_HTU21D
   #include <Adafruit_HTU21DF.h>
 #endif
+
 
 // =========================
 // Debug System
@@ -227,6 +236,12 @@ Preferences prefs;
   Adafruit_HTU21DF htu21d = Adafruit_HTU21DF();
 #endif
 
+// Helper macro to get effective status bar height based on clock mode
+// Morphing Remix mode (CLOCK_MODE_MORPH) automatically hides status bar for full display height
+#define GET_STATUS_BAR_H() ( \
+  (cfg.clockMode == CLOCK_MODE_MORPH) ? 0 : STATUS_BAR_H \
+)
+
 struct AppConfig {
   char tz[48]   = DEFAULT_TZ;
   char ntp[64]  = DEFAULT_NTP;
@@ -246,7 +261,7 @@ struct AppConfig {
   uint8_t morphSpeed = 1;      // 1-10, controls digit morphing duration
 
   // Clock display mode settings
-  uint8_t clockMode = DEFAULT_CLOCK_MODE;           // 0=7-seg, 1=Tetris, etc.
+  uint8_t clockMode = DEFAULT_CLOCK_MODE;           // 0=7-seg, 1=Tetris, 2=Morph Remix
   bool autoRotate = DEFAULT_AUTO_ROTATE;            // Auto-rotate through modes
   uint8_t rotateInterval = DEFAULT_ROTATE_INTERVAL; // Minutes between rotations
 
@@ -272,6 +287,171 @@ unsigned long lastSensorUpdate = 0;
 static uint16_t fb[LED_MATRIX_H][LED_MATRIX_W];
 static uint16_t fbPrev[LED_MATRIX_H][LED_MATRIX_W];  // Previous frame for delta rendering
 
+// =========================
+// Small 3x5 Bitmap Font for LED Matrix
+// =========================
+// Simple 3-pixel wide, 5-pixel tall font for displaying text on matrix
+// Each character is represented as 5 bytes (one per row)
+// Bit layout: bits 0-2 are the 3 columns (LSB = left column)
+
+const uint8_t font3x5[][5] = {
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // 0
+  {0b010, 0b110, 0b010, 0b010, 0b111}, // 1
+  {0b111, 0b001, 0b111, 0b100, 0b111}, // 2
+  {0b111, 0b001, 0b111, 0b001, 0b111}, // 3
+  {0b101, 0b101, 0b111, 0b001, 0b001}, // 4
+  {0b111, 0b100, 0b111, 0b001, 0b111}, // 5
+  {0b111, 0b100, 0b111, 0b101, 0b111}, // 6
+  {0b111, 0b001, 0b001, 0b001, 0b001}, // 7
+  {0b111, 0b101, 0b111, 0b101, 0b111}, // 8
+  {0b111, 0b101, 0b111, 0b001, 0b111}, // 9
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // : (space)
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // ; (space)
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // < (space)
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // = (space)
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // > (space)
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // ? (space)
+  {0b000, 0b000, 0b000, 0b000, 0b000}, // @ (space)
+  {0b111, 0b101, 0b111, 0b101, 0b101}, // A
+  {0b110, 0b101, 0b110, 0b101, 0b110}, // B
+  {0b111, 0b100, 0b100, 0b100, 0b111}, // C
+  {0b110, 0b101, 0b101, 0b101, 0b110}, // D
+  {0b111, 0b100, 0b111, 0b100, 0b111}, // E
+  {0b111, 0b100, 0b111, 0b100, 0b100}, // F
+  {0b111, 0b100, 0b101, 0b101, 0b111}, // G
+  {0b101, 0b101, 0b111, 0b101, 0b101}, // H
+  {0b111, 0b010, 0b010, 0b010, 0b111}, // I
+  {0b111, 0b001, 0b001, 0b101, 0b111}, // J
+  {0b101, 0b101, 0b110, 0b101, 0b101}, // K
+  {0b100, 0b100, 0b100, 0b100, 0b111}, // L
+  {0b101, 0b111, 0b111, 0b101, 0b101}, // M
+  {0b101, 0b111, 0b111, 0b111, 0b101}, // N
+  {0b111, 0b101, 0b101, 0b101, 0b111}, // O
+  {0b111, 0b101, 0b111, 0b100, 0b100}, // P
+  {0b111, 0b101, 0b101, 0b111, 0b001}, // Q
+  {0b111, 0b101, 0b110, 0b101, 0b101}, // R
+  {0b111, 0b100, 0b111, 0b001, 0b111}, // S (same as 5)
+  {0b111, 0b010, 0b010, 0b010, 0b010}, // T
+  {0b101, 0b101, 0b101, 0b101, 0b111}, // U
+  {0b101, 0b101, 0b101, 0b101, 0b010}, // V
+  {0b101, 0b101, 0b111, 0b111, 0b101}, // W
+  {0b101, 0b101, 0b010, 0b101, 0b101}, // X
+  {0b101, 0b101, 0b010, 0b010, 0b010}, // Y
+  {0b111, 0b001, 0b010, 0b100, 0b111}, // Z
+};
+
+// Character offset: '0' = index 0, 'A' = index 17
+static int getFont3x5Index(char c) {
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'Z') return c - 'A' + 17;
+  if (c >= 'a' && c <= 'z') return c - 'a' + 17; // lowercase -> uppercase
+  return 10; // space for unknown chars
+}
+
+// Draw a single character using the 3x5 font
+// Fixed: Draw correctly without horizontal flip
+static void drawChar3x5(char c, int x, int y, uint16_t color) {
+  int idx = getFont3x5Index(c);
+  const uint8_t* glyph = font3x5[idx];
+
+  for (int row = 0; row < 5; row++) {
+    for (int col = 0; col < 3; col++) {
+      // Font bits: bit 0 is rightmost, bit 2 is leftmost
+      // We need to draw col 0 at x, col 2 at x+2 (not flipped)
+      // So check bit (2-col) instead of col
+      if (glyph[row] & (1 << (2 - col))) {
+        int px = x + col;
+        int py = y + row;
+        if (px >= 0 && px < LED_MATRIX_W && py >= 0 && py < LED_MATRIX_H) {
+          fb[py][px] = color;
+        }
+      }
+    }
+  }
+}
+
+// Calculate the width of a string using the 3x5 font
+static int getTextWidth3x5(const char* text) {
+  int width = 0;
+  while (*text) {
+    if (*text == ' ') {
+      width += 3;
+    } else if (*text == '.') {
+      width += 2;
+    } else if (*text == '/') {
+      width += 3;
+    } else if (*text == '-') {
+      width += 4;
+    } else if (*text == '%') {
+      width += 4;
+    } else {
+      width += 4;  // 3 pixels + 1 pixel spacing
+    }
+    text++;
+  }
+  return width;
+}
+
+// Draw a string using the 3x5 font
+static void drawText3x5(const char* text, int x, int y, uint16_t color) {
+  int cursorX = x;
+  while (*text) {
+    if (*text == ' ') {
+      cursorX += 3; // space width (reduced from 4)
+    } else if (*text == '.') {
+      // Draw a dot (period) - single pixel at bottom
+      if (cursorX >= 0 && cursorX < LED_MATRIX_W && y + 4 >= 0 && y + 4 < LED_MATRIX_H) {
+        fb[y + 4][cursorX] = color;
+      }
+      cursorX += 2;
+    } else if (*text == '/') {
+      // Draw a forward slash - diagonal line from bottom-left to top-right
+      // Row 0: x+2, Row 1: x+2, Row 2: x+1, Row 3: x+1, Row 4: x+0
+      for (int row = 0; row < 5; row++) {
+        int px = cursorX + (2 - row / 2);  // Creates pattern: 2,2,1,1,0
+        int py = y + row;
+        if (px >= 0 && px < LED_MATRIX_W && py >= 0 && py < LED_MATRIX_H) {
+          fb[py][px] = color;
+        }
+      }
+      cursorX += 3;
+    } else if (*text == '-') {
+      // Draw a dash/minus - horizontal line in middle
+      for (int px = cursorX; px < cursorX + 3; px++) {
+        if (px >= 0 && px < LED_MATRIX_W && y + 2 >= 0 && y + 2 < LED_MATRIX_H) {
+          fb[y + 2][px] = color;
+        }
+      }
+      cursorX += 4;
+    } else if (*text == '%') {
+      // Draw percent sign - dot, slash, dot pattern
+      // Top dot at (0,0)
+      if (y >= 0 && y < LED_MATRIX_H && cursorX >= 0 && cursorX < LED_MATRIX_W) {
+        fb[y][cursorX] = color;
+      }
+      // Diagonal slash
+      if (y + 1 >= 0 && y + 1 < LED_MATRIX_H && cursorX + 1 >= 0 && cursorX + 1 < LED_MATRIX_W) {
+        fb[y + 1][cursorX + 1] = color;
+      }
+      if (y + 2 >= 0 && y + 2 < LED_MATRIX_H && cursorX + 1 >= 0 && cursorX + 1 < LED_MATRIX_W) {
+        fb[y + 2][cursorX + 1] = color;
+      }
+      if (y + 3 >= 0 && y + 3 < LED_MATRIX_H && cursorX + 2 >= 0 && cursorX + 2 < LED_MATRIX_W) {
+        fb[y + 3][cursorX + 2] = color;
+      }
+      // Bottom dot at (2,4)
+      if (y + 4 >= 0 && y + 4 < LED_MATRIX_H && cursorX + 2 >= 0 && cursorX + 2 < LED_MATRIX_W) {
+        fb[y + 4][cursorX + 2] = color;
+      }
+      cursorX += 4;  // Reduced from 6 for tighter spacing
+    } else {
+      drawChar3x5(*text, cursorX, y, color);
+      cursorX += 4; // 3 pixels + 1 pixel spacing
+    }
+    text++;
+  }
+}
+
 // Cached date string for status bar
 static char currDate[11] = "----/--/--";
 
@@ -281,7 +461,13 @@ static int fbPitch = 2;
 // Clock mode management
 TetrisClock* tetrisClock = nullptr;  // Tetris clock instance (created in setup)
 unsigned long lastModeRotation = 0;  // Last time clock mode was rotated
-const uint8_t TOTAL_CLOCK_MODES = 2; // 0=7-seg, 1=Tetris
+const uint8_t TOTAL_CLOCK_MODES = 3; // 0=7-seg, 1=Tetris, 2=Morph
+
+// Morphing clock digits (for CLOCK_MODE_MORPH)
+MorphingDigit morphHourTens, morphHourUnits;
+MorphingDigit morphMinuteTens, morphMinuteUnits;
+MorphingDigit morphSecondTens, morphSecondUnits;
+unsigned long lastMorphUpdate = 0;  // Last morphing animation update time
 bool clockColon = true;              // Colon blink state
 unsigned long lastColonToggle = 0;   // Last colon toggle time
 uint8_t fadeLevel = 255;             // Current fade level (0-255) for mode transitions
@@ -463,13 +649,22 @@ static void setBacklight(uint8_t b) {
 // Flicker-free renderer using SMALL sprite (with intensity)
 // =========================
 static int computeRenderPitch() {
-  int matrixAreaH = tft.height() - STATUS_BAR_H;
+  int matrixAreaH = tft.height() - GET_STATUS_BAR_H();
   if (matrixAreaH < 1) matrixAreaH = tft.height();
 
-  // With Touchdown 480x320 landscape:
-  // pitch = min(480/64, matrixAreaH/32) = min(7, matrixAreaH/32)
-  // Maximum pitch is 7 (limited by width), giving 480×224 display
-  // Use min to ensure it fits in both dimensions
+  // For Morph Remix mode (CLOCK_MODE_MORPH), use 75% of max vertical space
+  // Since it has no status bar and shows date/sensor in framebuffer itself
+  // Reduced by 25% from pitch=10 to pitch=7.5 for better display fit
+  if (cfg.clockMode == CLOCK_MODE_MORPH) {
+    // Calculate pitch: 320px / 32 LEDs = 10, reduced by 25% = 7.5
+    // This gives us 64*7.5 = 480px width (perfect fit on 480px screen!)
+    // and 32*7.5 = 240px height (centered in 320px with margins)
+    int pitchH = (matrixAreaH * 3) / (LED_MATRIX_H * 4);  // 75% of max: (320 * 3) / (32 * 4) = 7.5 rounds to 7
+    if (pitchH < 1) pitchH = 1;
+    return pitchH;
+  }
+
+  // Other modes: Use min to ensure it fits in both dimensions (square pixels)
   int maxPitch = min(tft.width() / LED_MATRIX_W, matrixAreaH / LED_MATRIX_H);
   if (maxPitch < 1) maxPitch = 1;
   return maxPitch;
@@ -496,11 +691,15 @@ static void resetStatusBar() {
 
 static void drawStatusBar() {
 #if STATUS_BAR_H > 0
+  // Get mode-specific status bar height (0 for Morph Remix when enabled)
+  int effectiveStatusBarH = GET_STATUS_BAR_H();
+  if (effectiveStatusBarH == 0) return;  // Status bar hidden for this mode
+
   static uint32_t lastDrawMs = 0;
   static char lastLine1[64] = "";
   static char lastLine2[64] = "";
 
-  int barY = tft.height() - STATUS_BAR_H;
+  int barY = tft.height() - effectiveStatusBarH;
   if (barY < 0) barY = tft.height();
 
   char line1[64];
@@ -563,16 +762,43 @@ static void drawStatusBar() {
 }
 
 static void renderFBToTFT() {
-  const int pitch = fbPitch;
-  const int sprW = LED_MATRIX_W * pitch; // 320 when 64x32 with pitch 5
-  const int sprH = LED_MATRIX_H * pitch; // 160 when 64x32 with pitch 5
+  // For Morph Remix mode (CLOCK_MODE_MORPH), use non-square pixels to fill full 480×320 screen
+  // Other modes use square pixels with standard pitch
+  int pitchX, pitchY;
 
-  int matrixAreaH = tft.height() - STATUS_BAR_H;
+  if (cfg.clockMode == CLOCK_MODE_MORPH) {
+    // Non-square pixels for full screen coverage (configurable in config.h)
+    pitchX = MORPH_PITCH_X;  // Default: 8 pixels per LED horizontally (64*8=512px)
+    pitchY = MORPH_PITCH_Y;  // Default: 9 pixels per LED vertically (32*9=288px)
+  } else {
+    // Square pixels for other modes
+    pitchX = fbPitch;
+    pitchY = fbPitch;
+  }
+
+  const int sprW = LED_MATRIX_W * pitchX;
+  const int sprH = LED_MATRIX_H * pitchY;
+
+  // Use mode-specific status bar height
+  int matrixAreaH = tft.height() - GET_STATUS_BAR_H();
   if (matrixAreaH < sprH) matrixAreaH = tft.height();
 
-  int x0 = (tft.width()  - sprW) / 2;
-  int y0 = (matrixAreaH - sprH) / 2;
+  int x0, y0;
+  if (cfg.clockMode == CLOCK_MODE_MORPH) {
+    // Morph Remix mode: center both horizontally and vertically
+    // pitchX=8, pitchY=9: 64*8=512px width, 32*9=288px height
+    // Center horizontally: (480-512)/2 = -16 (will clip left/right edges)
+    // Center vertically: (320-288)/2 = 16 (margins top/bottom)
+    x0 = (tft.width()  - sprW) / 2;  // Center horizontally
+    y0 = (tft.height() - sprH) / 2;  // Center vertically
+  } else {
+    // Other modes: center in matrix area with square pixels
+    x0 = (tft.width()  - sprW) / 2;
+    y0 = (matrixAreaH - sprH) / 2;
+  }
 
+  // Calculate LED dot size based on pitch (use pitchX for gap/dot calculation)
+  int pitch = (pitchX < pitchY) ? pitchX : pitchY;  // Use smaller pitch for dot size calc
   int gapWanted = (int)cfg.ledGap;
   if (gapWanted < 0) gapWanted = 0;
   if (gapWanted > pitch - 1) gapWanted = pitch - 1;
@@ -584,13 +810,14 @@ static void renderFBToTFT() {
   if (dot < 1) dot = 1;
 
   int gap = pitch - dot;
-  const int inset = (pitch - dot) / 2;
+  const int insetX = (pitchX - dot) / 2;
+  const int insetY = (pitchY - dot) / 2;
 
   // Verbose debug output (print once per second)
   static uint32_t lastDbg = 0;
   if (millis() - lastDbg > 1000) {
-    DBG_VERBOSE("Render: pitch=%d dot=%d gap=%d ledD=%d ledG=%d\n",
-                pitch, dot, gap, cfg.ledDiameter, cfg.ledGap);
+    DBG_VERBOSE("Render: pitchX=%d pitchY=%d dot=%d gap=%d ledD=%d ledG=%d\n",
+                pitchX, pitchY, dot, gap, cfg.ledDiameter, cfg.ledGap);
     lastDbg = millis();
   }
 
@@ -606,7 +833,7 @@ static void renderFBToTFT() {
       for (int x = 0; x < LED_MATRIX_W; x++) {
         uint16_t color = fb[y][x];
         if (color == 0) continue;
-        spr.fillRect(x * pitch + inset, y * pitch + inset, dot, dot, color);
+        spr.fillRect(x * pitchX + insetX, y * pitchY + insetY, dot, dot, color);
       }
     }
     tft.startWrite();
@@ -628,7 +855,9 @@ static void renderFBToTFT() {
       if (color == colorPrev) continue;
 
       // Use color directly (already RGB565)
-      tft.fillRect(x0 + x * pitch + inset, y0 + y * pitch + inset, dot, dot, color);
+      // For Morph mode: non-square pixels (pitchX=7, pitchY=10)
+      // For other modes: square pixels (pitchX=pitchY)
+      tft.fillRect(x0 + x * pitchX + insetX, y0 + y * pitchY + insetY, dot, dot, color);
     }
   }
   tft.endWrite();  // Flush all batched writes
@@ -1036,14 +1265,14 @@ static void handleTouch() {
   unsigned long now = millis();
 
   // Check for info page timeout (30s of inactivity)
-  if (infoPageActive && (now - infoPageStartTime >= INFO_PAGE_TIMEOUT_MS)) {
-    DBG_INFO("Info page timeout - returning to clock display\n");
-    infoPageActive = false;
-    tft.fillScreen(TFT_BLACK);
-    memset(fbPrev, 0, sizeof(fbPrev));  // Force full redraw
-    resetStatusBar();
-    return;
-  }
+      if (infoPageActive && (now - infoPageStartTime >= INFO_PAGE_TIMEOUT_MS)) {
+        DBG_INFO("Info page timeout - returning to clock display\n");
+        infoPageActive = false;
+        tft.fillScreen(TFT_BLACK);  // Clear entire TFT to remove any clock artifacts
+        memset(fbPrev, 0, sizeof(fbPrev));  // Force full redraw
+        resetStatusBar();
+        return;
+      }
 
   if (isTouched) {
     if (!touchHeld) {
@@ -1891,10 +2120,23 @@ static void handlePostConfig() {
     uint8_t oldClockMode = cfg.clockMode;
     uint8_t newClockMode = (uint8_t)constrain(doc["clockMode"].as<int>(), 0, TOTAL_CLOCK_MODES - 1);
     if (oldClockMode != newClockMode) {
-      const char* modes[] = {"Morphing", "Tetris"};
+      const char* modes[] = {"Morphing (Classic)", "Tetris", "Morphing (Remix)"};
       DBG_INFO("  [%s] Clock mode changed: %s -> %s\n", clientIP.c_str(),
                modes[oldClockMode], modes[newClockMode]);
-      switchClockMode(newClockMode);  // Use fade transition
+      // Update config first
+      cfg.clockMode = newClockMode;
+      // Update render pitch for new mode (affects status bar height) BEFORE clearing
+      updateRenderPitch();
+      // Full TFT clear for clean transition - must happen AFTER updateRenderPitch
+      tft.fillScreen(TFT_BLACK);
+      // Clear the framebuffer
+      fbClear();
+      // Sync fbPrev with the cleared TFT state (all zeros) for clean comparison
+      memset(fbPrev, 0, sizeof(fbPrev));
+      resetStatusBar();
+      // Start fade transition for smooth mode switch
+      inTransition = true;
+      fadeLevel = 255;
     }
   }
 
@@ -2383,6 +2625,319 @@ static void drawFrameTetris() {
   tetrisClock->update(timeStr, cfg.use24h, clockColon, isPM);
 }
 
+/**
+ * Draw a segment pixel with bounds checking for the LED matrix
+ */
+static void drawLEDSegmentPixel(int x, int y, uint16_t color) {
+  if (x >= 0 && x < LED_MATRIX_W && y >= 0 && y < LED_MATRIX_H) {
+    fb[y][x] = color;
+  }
+}
+
+/**
+ * Helper function to draw LED segments with proper bounds checking
+ * Segments are drawn as 1-pixel thick lines (thickness handled by caller)
+ */
+static void drawLEDSegment(int x1, int y1, int x2, int y2, int thickness, uint8_t brightness, uint16_t baseColor) {
+  if (brightness == 0) return;  // Don't draw invisible segments
+
+  // Apply brightness to color
+  uint8_t r = ((baseColor >> 11) & 0x1F) * brightness / 255;
+  uint8_t g = ((baseColor >> 5) & 0x3F) * brightness / 255;
+  uint8_t b = (baseColor & 0x1F) * brightness / 255;
+  uint16_t color = (r << 11) | (g << 5) | b;
+
+  // Draw line from (x1,y1) to (x2,y2) with bounds checking
+  int dx = abs(x2 - x1);
+  int dy = abs(y2 - y1);
+  int steps = max(dx, dy);
+  
+  for (int i = 0; i <= steps; i++) {
+    float t = steps > 0 ? (float)i / steps : 0.0f;
+    int x = x1 + (int)((x2 - x1) * t);
+    int y = y1 + (int)((y2 - y1) * t);
+    drawLEDSegmentPixel(x, y, color);
+  }
+
+  // Draw thickness (1 pixel on each side of the center line)
+  if (dx > dy) {
+    // Horizontal segment - add thickness above/below
+    for (int i = 0; i <= steps; i++) {
+      float t = steps > 0 ? (float)i / steps : 0.0f;
+      int x = x1 + (int)((x2 - x1) * t);
+      int y = y1 + (int)((y2 - y1) * t);
+      drawLEDSegmentPixel(x, y + 1, color);  // One pixel below
+    }
+  } else if (dy > dx) {
+    // Vertical segment - add thickness to the right
+    for (int i = 0; i <= steps; i++) {
+      float t = steps > 0 ? (float)i / steps : 0.0f;
+      int x = x1 + (int)((x2 - x1) * t);
+      int y = y1 + (int)((y2 - y1) * t);
+      drawLEDSegmentPixel(x + 1, y, color);  // One pixel to the right
+    }
+  }
+}
+
+/**
+ * Draw a single LED dot at the specified position
+ * LED has a glowing effect with center brighter than edges
+ * @param x X position in framebuffer
+ * @param y Y position in framebuffer
+ * @param color Base LED color (RGB565)
+ * @param brightness Brightness level (0-255)
+ */
+static void drawLEDDot(int x, int y, uint16_t color, uint8_t brightness) {
+  if (x < 0 || y < 0 || x >= LED_MATRIX_W || y >= LED_MATRIX_H) return;
+
+  // Apply brightness to color
+  uint8_t r = ((color >> 11) & 0x1F) * brightness / 255;
+  uint8_t g = ((color >> 5) & 0x3F) * brightness / 255;
+  uint8_t b = (color & 0x1F) * brightness / 255;
+  uint16_t scaledColor = (r << 11) | (g << 5) | b;
+
+  // Draw LED dot as a small filled circle pattern
+  // Center pixel (brightest)
+  fb[y][x] = scaledColor;
+
+  // Small glow effect (neighboring pixels at reduced brightness)
+  uint8_t glow = brightness / 3;
+  uint8_t gr = ((color >> 11) & 0x1F) * glow / 255;
+  uint8_t gg = ((color >> 5) & 0x3F) * glow / 255;
+  uint8_t gb = (color & 0x1F) * glow / 255;
+  uint16_t glowColor = (gr << 11) | (gg << 5) | gb;
+
+  // Draw surrounding glow pixels if within bounds
+  if (x > 0) fb[y][x - 1] = glowColor;
+  if (x < LED_MATRIX_W - 1) fb[y][x + 1] = glowColor;
+  if (y > 0) fb[y - 1][x] = glowColor;
+  if (y < LED_MATRIX_H - 1) fb[y + 1][x] = glowColor;
+}
+
+/**
+ * Draw a segment as a row of LED dots (classic LED display look)
+ * @param x1 Start X position
+ * @param y1 Start Y position
+ * @param x2 End X position
+ * @param y2 End Y position
+ * @param numLEDs Number of LEDs in this segment
+ * @param brightness Brightness level (0-255)
+ * @param color Base LED color (RGB565)
+ */
+static void drawLEDSegmentDots(int x1, int y1, int x2, int y2, int numLEDs, uint8_t brightness, uint16_t color) {
+  if (brightness == 0) return;
+
+  // Calculate LED positions along the segment
+  for (int i = 0; i < numLEDs; i++) {
+    float t = (float)i / (float)(numLEDs - 1);
+    int x = x1 + (int)((x2 - x1) * t);
+    int y = y1 + (int)((y2 - y1) * t);
+    drawLEDDot(x, y, color, brightness);
+  }
+}
+
+/**
+ * Render a single morphing digit at the specified position
+ * Draws each segment as a row of LED dots with the digit's color
+ * @param digit The MorphingDigit instance to render
+ * @param offsetX X offset in matrix coordinates
+ * @param offsetY Y offset in matrix coordinates
+ */
+static void renderMorphingDigit(MorphingDigit* digit, int offsetX, int offsetY, uint16_t color) {
+  // Use the provided color (user's configured LED color) instead of per-digit colors
+
+  // Render all 7 segments
+  for (int seg = 0; seg < 7; seg++) {
+    uint8_t brightness = digit->getSegmentBrightness(seg);
+    if (brightness == 0) continue;  // Skip off segments
+
+    const SegmentCoords& coords = SEGMENT_COORDS[seg];
+
+    // Apply offset and render segment as LED dots
+    int x1 = offsetX + coords.x1;
+    int y1 = offsetY + coords.y1;
+    int x2 = offsetX + coords.x2;
+    int y2 = offsetY + coords.y2;
+
+    // thickness field is now used to store number of LEDs per segment
+    int numLEDs = coords.thickness;
+    if (numLEDs < 2) numLEDs = 2;  // Minimum 2 LEDs per segment
+
+    drawLEDSegmentDots(x1, y1, x2, y2, numLEDs, brightness, color);
+  }
+}
+
+/**
+ * Draw morphing clock display (CLOCK_MODE_MORPH)
+ * Layout: HH:MM:SS centered on 64x32 matrix with 8x32 digit slots
+ * Seconds update instantly without morphing for clear readability
+ */
+static void drawFrameMorph() {
+  fbClear(0);  // Clear framebuffer
+
+  // Parse current time
+  uint8_t hourTens = currT[0] - '0';
+  uint8_t hourUnits = currT[1] - '0';
+  uint8_t minuteTens = currT[2] - '0';
+  uint8_t minuteUnits = currT[3] - '0';
+  uint8_t secondTens = currT[4] - '0';
+  uint8_t secondUnits = currT[5] - '0';
+
+  // Only update morphing targets when the digit actually changes (for HH and MM)
+  // Seconds update instantly without morphing for clear readability
+  if (currT[0] != prevT[0]) morphHourTens.setTarget(hourTens);
+  if (currT[1] != prevT[1]) morphHourUnits.setTarget(hourUnits);
+  if (currT[2] != prevT[2]) morphMinuteTens.setTarget(minuteTens);
+  if (currT[3] != prevT[3]) morphMinuteUnits.setTarget(minuteUnits);
+  
+  // Seconds: update instantly without morphing
+  morphSecondTens.setCurrent(secondTens);
+  morphSecondUnits.setCurrent(secondUnits);
+
+  // Update morphing animations every frame for smooth transitions (HH and MM only)
+  unsigned long now = millis();
+  unsigned long delta = now - lastMorphUpdate;
+  if (delta > 100) delta = 100;  // Cap delta to prevent jumps
+
+  morphHourTens.update(delta);
+  morphHourUnits.update(delta);
+  morphMinuteTens.update(delta);
+  morphMinuteUnits.update(delta);
+
+  lastMorphUpdate = now;
+
+  // Digit positioning for 64x32 matrix
+  // Layout: HH : MM : SS with proper spacing and visible colons
+  // Compact digits (18 rows) fit between sensor (y=0-4) and date (y=27-31)
+  // 6 digits at 7px wide = 42px, 2 colons at 2px = 4px, 2 digitGaps at 1px = 2px, 4 colonGaps at 1px = 4px
+  // Total width = 42 + 4 + 2 + 4 = 52px (shifted left slightly with 5px left margin)
+
+  const int digitWidth = 7;    // Digit width (matches segment coords)
+  const int digitGap = 1;      // Gap between digits within same group (HH, MM, SS)
+  const int colonGap = 1;      // Gap before/after colons (1 LED pixel)
+  const int colonWidth = 2;    // Colon width (2px for 2x2 LED dots)
+  const int startX = 5;        // Start with 5px margin on left (shifted left by 1 LED)
+  const int startY = 6;        // Start at y=6 (digits span y=7-24, leaving y=25-26 as 2-row gap before date at y=27)
+
+  uint16_t ledColor = cfg.ledColor;
+
+  // Create dimmed color for colons (50% brightness)
+  // Extract RGB565 components and dim them
+  uint16_t r = (ledColor >> 11) & 0x1F;
+  uint16_t g = (ledColor >> 5) & 0x3F;
+  uint16_t b = ledColor & 0x1F;
+  r = r / 2;
+  g = g / 2;
+  b = b / 2;
+  uint16_t colonColor = (r << 11) | (g << 5) | b;
+
+  // Calculate positions for each digit with proper spacing
+  int x = startX;
+
+  // HH (hours)
+  renderMorphingDigit(&morphHourTens, x, startY, ledColor);
+  x += digitWidth + digitGap;
+  renderMorphingDigit(&morphHourUnits, x, startY, ledColor);
+  x += digitWidth + colonGap;
+
+  // First colon (between hours and minutes) - 2x2 LED dots with dimmed color
+  if (clockColon) {
+    int colonY1 = startY + 5;   // Upper dot position (aligned with upper segment)
+    int colonY2 = startY + 13;  // Lower dot position (aligned with lower segment)
+    // Draw 2x2 colon dots
+    for (int dy = 0; dy < 2; dy++) {
+      for (int dx = 0; dx < 2; dx++) {
+        int px = x + dx;
+        int py1 = colonY1 + dy;
+        int py2 = colonY2 + dy;
+        if (px >= 0 && px < LED_MATRIX_W) {
+          if (py1 >= 0 && py1 < LED_MATRIX_H) fb[py1][px] = colonColor;
+          if (py2 >= 0 && py2 < LED_MATRIX_H) fb[py2][px] = colonColor;
+        }
+      }
+    }
+  }
+  x += colonWidth + colonGap;
+
+  // MM (minutes)
+  renderMorphingDigit(&morphMinuteTens, x, startY, ledColor);
+  x += digitWidth + digitGap;
+  renderMorphingDigit(&morphMinuteUnits, x, startY, ledColor);
+  x += digitWidth + colonGap;
+
+  // Second colon (between minutes and seconds) - 2x2 LED dots with dimmed color
+  if (clockColon) {
+    int colonY1 = startY + 5;   // Upper dot position (aligned with upper segment)
+    int colonY2 = startY + 13;  // Lower dot position (aligned with lower segment)
+    // Draw 2x2 colon dots
+    for (int dy = 0; dy < 2; dy++) {
+      for (int dx = 0; dx < 2; dx++) {
+        int px = x + dx;
+        int py1 = colonY1 + dy;
+        int py2 = colonY2 + dy;
+        if (px >= 0 && px < LED_MATRIX_W) {
+          if (py1 >= 0 && py1 < LED_MATRIX_H) fb[py1][px] = colonColor;
+          if (py2 >= 0 && py2 < LED_MATRIX_H) fb[py2][px] = colonColor;
+        }
+      }
+    }
+  }
+  x += colonWidth + colonGap;
+
+  // SS (seconds)
+  renderMorphingDigit(&morphSecondTens, x, startY, ledColor);
+  x += digitWidth + digitGap;
+  renderMorphingDigit(&morphSecondUnits, x, startY, ledColor);
+
+  // Add date display at BOTTOM of matrix - always anchored to bottom row
+  // Using y=27 ensures date (5 rows tall) spans y=27-31 within 32-row framebuffer (y=0-31)
+  // This leaves y=26 as gap between clock digits and date (1 row gap)
+  // Format currDate string (e.g., "12/01/2026" or "2026-01-12")
+  if (currDate[0] != '-') {  // Check if date is valid (not "----/--/--")
+    // Center date horizontally
+    int dateWidth = getTextWidth3x5(currDate);
+    int dateX = (LED_MATRIX_W - dateWidth) / 2;
+    drawText3x5(currDate, dateX, 27, ledColor);
+  }
+
+  // Add sensor data at TOP of matrix (y=0-4) - always anchored to top
+  // Display format based on available sensor data
+  if (sensorAvailable) {
+    char sensorLine[64];  // Buffer for sensor text
+
+    // Convert temperature to display unit
+    int displayTemp = temperature;
+    const char* tempUnit = cfg.useFahrenheit ? "F" : "C";
+    if (cfg.useFahrenheit) {
+      displayTemp = (temperature * 9 / 5) + 32;
+    }
+
+    // Format sensor string based on available sensor capabilities
+    // Compact format to fit in 64 LED matrix width
+    #if defined(USE_BME280)
+      // BME280: Temperature, Humidity, Pressure
+      snprintf(sensorLine, sizeof(sensorLine), "%d%s %d%% %dHPA",
+               displayTemp, tempUnit, humidity, pressure);
+    #elif defined(USE_BMP280) || defined(USE_BMP180)
+      // BMP280/BMP180: Temperature and Pressure only
+      snprintf(sensorLine, sizeof(sensorLine), "%d%s %dHPA",
+               displayTemp, tempUnit, pressure);
+    #elif defined(USE_SHT3X) || defined(USE_HTU21D)
+      // SHT3X/HTU21D: Temperature and Humidity only
+      snprintf(sensorLine, sizeof(sensorLine), "%d%s %d%%",
+               displayTemp, tempUnit, humidity);
+    #else
+      // Unknown sensor, just show temp
+      snprintf(sensorLine, sizeof(sensorLine), "%d%s", displayTemp, tempUnit);
+    #endif
+
+    // Draw at top of matrix (y=0), centered horizontally like the date
+    int sensorWidth = getTextWidth3x5(sensorLine);
+    int sensorX = (LED_MATRIX_W - sensorWidth) / 2;
+    drawText3x5(sensorLine, sensorX, 0, ledColor);
+  }
+}
+
 
 // =========================
 // Clock Mode Management
@@ -2401,8 +2956,20 @@ static void switchClockMode(uint8_t newMode) {
   // Update mode
   cfg.clockMode = newMode;
 
-  // Clear the framebuffer for clean transition
+  // Update render pitch for new mode (affects status bar height)
+  updateRenderPitch();
+
+  // Full TFT clear for clean transition
+  tft.fillScreen(TFT_BLACK);
+
+  // Clear the framebuffer
   fbClear();
+
+  // Sync fbPrev with the cleared TFT state (all zeros) for clean comparison
+  memset(fbPrev, 0, sizeof(fbPrev));
+
+  // Reset status bar
+  resetStatusBar();
 
   // Skip fade transition when switching TO Tetris mode
   // Tetris will naturally build up the time with falling blocks
@@ -2497,6 +3064,10 @@ static void renderCurrentMode() {
 
     case CLOCK_MODE_TETRIS:
       drawFrameTetris();
+      break;
+
+    case CLOCK_MODE_MORPH:
+      drawFrameMorph();
       break;
 
     default:
@@ -2778,6 +3349,25 @@ void setup() {
   showStartupStatus("READY", "System initialized!");
   delay(3000);  // Pause to allow reading startup messages before clearing
 
+  // Initialize morphing clock digits with current time to avoid morphing from 00:00:00
+  // Wait for NTP to sync and get initial time
+  struct tm ti{};
+  if (getLocalTimeSafe(ti, 1000)) {  // Wait up to 1 second for time
+    char t6[7] = {0};
+    formatTimeHHMMSS(ti, t6, sizeof(t6));
+    memcpy(currT, t6, 7);  // Set currT to current time
+
+    // Initialize morphing digits to current time (no morphing on startup)
+    morphHourTens.setCurrent(currT[0] - '0');
+    morphHourUnits.setCurrent(currT[1] - '0');
+    morphMinuteTens.setCurrent(currT[2] - '0');
+    morphMinuteUnits.setCurrent(currT[3] - '0');
+    morphSecondTens.setCurrent(currT[4] - '0');
+    morphSecondUnits.setCurrent(currT[5] - '0');
+
+    DBG("Morphing digits initialized to: %.2s:%.2s:%.2s\n", currT, currT+2, currT+4);
+  }
+
   // Clear startup display and start normal operation
   tft.fillScreen(TFT_BLACK);
   memset(fbPrev, 0, sizeof(fbPrev));  // Initialize delta buffer for clean first frame
@@ -2842,6 +3432,19 @@ void loop() {
     if (now - lastTetrisUpdate >= TETRIS_ANIMATION_SPEED) {
       needsUpdate = true;
       lastTetrisUpdate = now;
+    }
+  } else if (cfg.clockMode == CLOCK_MODE_MORPH) {
+    // Morphing Remix mode: update on time change or while any digit is morphing
+    bool anyMorphing = morphHourTens.isMorphing() || morphHourUnits.isMorphing() ||
+                       morphMinuteTens.isMorphing() || morphMinuteUnits.isMorphing() ||
+                       morphSecondTens.isMorphing() || morphSecondUnits.isMorphing();
+    needsUpdate = timeChanged || anyMorphing;
+
+    // Also update at regular interval for smooth animation (60 FPS = ~16ms)
+    static unsigned long lastMorphRender = 0;
+    if (now - lastMorphRender >= 16) {
+      needsUpdate = true;
+      lastMorphRender = now;
     }
   }
 

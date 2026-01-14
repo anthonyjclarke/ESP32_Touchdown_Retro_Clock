@@ -362,18 +362,35 @@ function renderMirror(buf, state) {
   if (isNaN(ledDiameter)) ledDiameter = 5;
   if (isNaN(ledGap)) ledGap = 0;
 
-  const matrixAreaH = TFT_H - STATUS_BAR_H;
-  let maxPitch = Math.min(Math.floor(TFT_W / LED_W), Math.floor(matrixAreaH / LED_H));
-  if (maxPitch < 1) maxPitch = 1;
-  const pitch = maxPitch;
-  mirrorPitch = pitch;
+  // Calculate effective status bar height (matches GET_STATUS_BAR_H() in main.cpp)
+  // Morphing Remix mode (clockMode=2) hides status bar for full display height
+  const effectiveStatusBarH = (state.clockMode == 2) ? 0 : STATUS_BAR_H;
+  const matrixAreaH = TFT_H - effectiveStatusBarH;
+
+  // For Morph Remix mode, use configurable non-square pixels
+  // ⚠️  CRITICAL: These values MUST match MORPH_PITCH_X and MORPH_PITCH_Y in include/config.h!
+  //    When you change pitch values in config.h, update these values to match.
+  //    Location in config.h: lines 74-75
+  let pitchX, pitchY;
+  if (state.clockMode == 2) {
+    // Non-square pixels (must match config.h values exactly)
+    pitchX = 8;  // ⚠️  MUST MATCH: MORPH_PITCH_X in include/config.h line 74
+    pitchY = 9;  // ⚠️  MUST MATCH: MORPH_PITCH_Y in include/config.h line 75
+  } else {
+    // Square pixels for other modes
+    const pitch = Math.min(Math.floor(TFT_W / LED_W), Math.floor(matrixAreaH / LED_H));
+    pitchX = pitch;
+    pitchY = pitch;
+  }
+  mirrorPitch = Math.min(pitchX, pitchY);  // For legacy compatibility
 
   if (canvas.width !== TFT_W || canvas.height !== TFT_H) {
     canvas.width = TFT_W;
     canvas.height = TFT_H;
   }
 
-  // Match the TFT rendering logic exactly (main.cpp:405-419)
+  // Calculate LED dot size based on smaller pitch
+  const pitch = Math.min(pitchX, pitchY);
   let gapWanted = ledGap;
   if (gapWanted < 0) gapWanted = 0;
   if (gapWanted > pitch - 1) gapWanted = pitch - 1;
@@ -385,18 +402,30 @@ function renderMirror(buf, state) {
   if (dot < 1) dot = 1;
 
   const gap = pitch - dot;
-  const inset = Math.floor((pitch - dot) / 2);
+  const insetX = Math.floor((pitchX - dot) / 2);
+  const insetY = Math.floor((pitchY - dot) / 2);
 
   // Debug logging
-  console.log(`[Mirror] pitch=${pitch} dot=${dot} gap=${gap} inset=${inset} ledD=${ledDiameter} ledG=${ledGap}`);
+  console.log(`[Mirror] pitchX=${pitchX} pitchY=${pitchY} dot=${dot} gap=${gap} insetX=${insetX} insetY=${insetY}`);
 
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, TFT_W, TFT_H);
 
-  const sprW = LED_W * pitch;
-  const sprH = LED_H * pitch;
-  const x0 = Math.floor((TFT_W - sprW) / 2);
-  const y0 = Math.floor((matrixAreaH - sprH) / 2);
+  // Calculate sprite dimensions
+  const sprW = LED_W * pitchX;
+  const sprH = LED_H * pitchY;
+
+  let x0, y0;
+  if (state.clockMode == 2) {
+    // Morph Remix mode: center both horizontally and vertically
+    // pitchX=8, pitchY=9: 64*8=512px width, 32*9=288px height
+    x0 = Math.floor((TFT_W - sprW) / 2);  // Center horizontally: (480-512)/2 = -16
+    y0 = Math.floor((TFT_H - sprH) / 2);  // Center vertically: (320-288)/2 = 16
+  } else {
+    // Other modes: center in matrix area
+    x0 = Math.floor((TFT_W - sprW) / 2);
+    y0 = Math.floor((matrixAreaH - sprH) / 2);
+  }
 
   // CRITICAL: The C++ framebuffer is declared as fb[LED_MATRIX_H][LED_MATRIX_W]
   // which means fb[y][x], so in linear memory it's row-major: [row0][row1][row2]...
@@ -423,13 +452,16 @@ function renderMirror(buf, state) {
       const b = (rgb565 & 0x1F) << 3;          // 5 bits -> 8 bits
 
       ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(x0 + x * pitch + inset, y0 + y * pitch + inset, dot, dot);
+      // For Morph mode: non-square pixels (pitchX=7, pitchY=10)
+      // For other modes: square pixels (pitchX=pitchY)
+      ctx.fillRect(x0 + x * pitchX + insetX, y0 + y * pitchY + insetY, dot, dot);
     }
   }
   console.log(`[Render] Drew ${nonZeroCount} non-zero LEDs`);
 
-  // Draw status bar only if STATUS_BAR_H > 0
-  if (STATUS_BAR_H > 0) {
+  // Draw status bar only for non-Morph Remix modes (clockMode != 2)
+  // Morphing Remix mode hides the status bar on both TFT and WebUI
+  if (state.clockMode != 2) {
     const barY = TFT_H - STATUS_BAR_H;
     if (barY >= 0) {
       ctx.fillStyle = "#000";

@@ -9,7 +9,7 @@
 // -----------------------------
 
 // ===== FIRMWARE VERSION =====
-#define FIRMWARE_VERSION "2.1.0"
+#define FIRMWARE_VERSION "2.5.0"
 
 // ===== LED MATRIX PANEL EMULATION =====
 // Logical LED grid (single 64x32 panel)
@@ -30,6 +30,9 @@
 // Reserve space below the matrix for status/info
 #define STATUS_BAR_H 70            // pixels (bottom status bar - increased for larger screen)
 
+// Morphing Remix mode (CLOCK_MODE_MORPH = 2) automatically hides status bar
+// to use full display height for digits and date display
+
 // Rendering mode: 0 = sprite (flickery during morph), 1 = direct TFT (smooth)
 #define DISABLE_SPRITE_RENDERING 1  // Use direct TFT rendering to eliminate morph flashing
 
@@ -49,11 +52,27 @@
 #define CLOCK_MODE_TETRIS  1    // Tetris - Animated falling blocks form time digits
                                 // Uses TetrisAnimation by Tobias Blum (toblum)
                                 // https://github.com/toblum/TetrisAnimation
+#define CLOCK_MODE_MORPH   2    // Morphing (Remix) - Segment-based morphing with bezier curves
+                                // Based on MorphingClockRemix by lmirel
+                                // https://github.com/lmirel/MorphingClockRemix
 // Future modes: CLOCK_MODE_ANALOG, CLOCK_MODE_BINARY, CLOCK_MODE_WORD, etc.
 
-#define DEFAULT_CLOCK_MODE CLOCK_MODE_7SEG  // Default: Morphing (Classic) mode
+#define DEFAULT_CLOCK_MODE CLOCK_MODE_MORPH  // Default: Morphing (Remix) mode for testing
 #define DEFAULT_AUTO_ROTATE false           // Auto-rotate through clock modes
 #define DEFAULT_ROTATE_INTERVAL 5           // Minutes between mode changes (when auto-rotate enabled)
+
+// ===== MORPHING (REMIX) MODE PIXEL PITCH CONFIGURATION =====
+// These control how the 64×32 LED matrix is scaled to the 480×320 TFT display
+// pitchX: Horizontal pixels per LED (480 / 64 = 7.5, use 7-10)
+// pitchY: Vertical pixels per LED (320 / 32 = 10, use 8-10)
+// Lower values = smaller display with more margin, Higher values = larger display
+//
+// ⚠️  CRITICAL: When you change these values, you MUST also update the matching
+//    values in data/app.js (lines 375-376) for the WebUI mirror to match!
+//    Search for "MORPH_PITCH_X" and "MORPH_PITCH_Y" in app.js
+//
+#define MORPH_PITCH_X 8    // Horizontal pitch (7-10 recommended, 8 for better spacing)
+#define MORPH_PITCH_Y 9    // Vertical pitch (8-10 recommended, 9 for room at top/bottom)
 
 // Tetris animation speed (milliseconds between animation frames)
 // Lower = faster falling blocks, Higher = slower, more visible animation

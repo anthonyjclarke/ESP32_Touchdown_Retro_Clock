@@ -5,6 +5,54 @@ All notable changes to the ESP32 Touchdown LED Matrix Retro Clock project will b
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-01-14
+
+### Added - Morphing (Remix) Mode Polish
+- **Unified color system** for Morphing (Remix) mode
+  - All clock digits (HH:MM:SS) now use the user-configured LED color from WebUI
+  - Colons display at 50% brightness of the LED color for subtle visual separation
+  - Removed rainbow per-digit colors in favor of consistent theming
+- **Configurable pixel pitch** for Morphing (Remix) mode display scaling
+  - `MORPH_PITCH_X` and `MORPH_PITCH_Y` in config.h control 64×32 LED matrix scaling to 480×320 TFT
+  - Independent horizontal and vertical scaling for optimal screen usage
+  - WebUI mirror automatically matches TFT display with synchronized pitch values
+
+### Fixed
+- **Display layout optimization** for Morphing (Remix) mode
+  - Sensor data now centered horizontally at top (was left-aligned with clipping)
+  - Clock digits moved up by 1 LED pixel for better balance
+  - Date display moved to y=27 to fit within 32-row framebuffer (was clipping at y=28)
+  - Proper vertical spacing: Sensor (y=0-4), Gap (y=5), Clock (y=6-24), Gap (y=25-26), Date (y=27-31)
+- **Digit spacing improvements**
+  - Reduced colon gaps from 3 to 1 LED pixel for tighter, more readable spacing
+  - Clock shifted left by 1 LED pixel for better horizontal centering
+  - 2-row gap between clock and date for visual separation
+- **Segment rendering**
+  - Shrunk digit height from 21 to 18 rows to eliminate overlap
+  - Updated segment coordinates for compact 7x18 pixel digit slots
+  - Colon position adjusted to align with shorter digits
+
+### Changed
+- **Morphing (Remix) mode color rendering**
+  - `renderMorphingDigit()` now accepts color parameter instead of using per-digit colors
+  - RGB565 color dimming algorithm for colons (50% brightness)
+- **Sensor data formatting**
+  - BMP280/BMP180: Shows "28C 1007HPA" (temperature + pressure with units)
+  - BME280: Shows "28C 65% 1007HPA" (temperature + humidity % + pressure)
+  - SHT3X/HTU21D: Shows "28C 65%" (temperature + humidity %)
+  - Proper percent symbol rendering using `%%` in format string
+- **Display pitch configuration**
+  - Default MORPH_PITCH_X = 8 (horizontal: 64×8 = 512px width)
+  - Default MORPH_PITCH_Y = 9 (vertical: 32×9 = 288px height)
+  - Critical synchronization required between config.h and app.js for WebUI mirror
+
+### Technical Details
+- Morphing (Remix) mode digit layout: startX=5, startY=6, digitWidth=7, colonGap=1
+- Segment coordinates updated in MorphingDigit.h for 18-row tall digits
+- Colon rendering uses 2×2 LED dots at 50% brightness
+- Date and sensor text centered using `getTextWidth3x5()` calculation
+- RGB565 color dimming: Extract components, divide by 2, recombine
+
 ## [2.1.0] - 2026-01-12
 
 ### Added - Touch Interface Implementation

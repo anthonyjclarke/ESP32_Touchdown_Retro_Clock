@@ -1,7 +1,7 @@
 # ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock
 
 <!-- Note: Update version badge below when FIRMWARE_VERSION changes in include/config.h -->
-![Version](https://img.shields.io/badge/version-2.1.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32%20Touchdown-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 ![LED Type](https://img.shields.io/badge/LED-HUB75%20RGB-red.svg)
@@ -19,6 +19,16 @@ The clock offers multiple display styles that you can select via the web interfa
 Smooth LED digit morphing animations based on [Morphing Clock](https://github.com/hwiguna/HariFun_166_Morphing_Clock) by Hari Wiguna (HariFun).
 
 ![Morphing Clock](images/Display1_anim.gif)
+
+### Morphing (Remix) Mode **✨ NEW in v2.5.0**
+Enhanced morphing clock with segment-based animations and bezier curves based on [MorphingClockRemix](https://github.com/lmirel/MorphingClockRemix) by lmirel.
+
+**Features:**
+- **Unified color theming**: All digits use the user-configured LED color from WebUI
+- **Subtle colon dimming**: Colons display at 50% brightness for visual separation
+- **Optimized layout**: Sensor data at top, clock centered, date at bottom with proper spacing
+- **Configurable scaling**: Independent horizontal and vertical pixel pitch control
+- **Full screen usage**: 480×320 TFT display fully utilized with adjustable margins
 
 ### Tetris Animation Mode
 Animated Tetris blocks fall into place to form time digits using [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum (toblum).
@@ -303,6 +313,35 @@ Settings are stored in `include/config.h`. Default values:
 #define DEFAULT_LED_COLOR_565 0xF800  // Red
 #define STATUS_BAR_H 70  // pixels
 ```
+
+#### Morphing (Remix) Mode Display Configuration
+
+The Morphing (Remix) mode (Mode 3) uses configurable pixel pitch values to control the display size:
+
+```cpp
+#define MORPH_PITCH_X 8    // Horizontal pitch (7-10 recommended)
+#define MORPH_PITCH_Y 9    // Vertical pitch (8-10 recommended)
+```
+
+**⚠️ CRITICAL:** When you change `MORPH_PITCH_X` or `MORPH_PITCH_Y` in `include/config.h`, you **MUST** also update the matching values in `data/app.js` (lines 377-378) for the WebUI mirror to display correctly!
+
+**Example configurations:**
+
+```cpp
+// Smaller display with margins (fits on screen):
+#define MORPH_PITCH_X 7    // 64*7=448px width (16px margins)
+#define MORPH_PITCH_Y 8    // 32*8=256px height (32px margins)
+
+// Current balanced setting:
+#define MORPH_PITCH_X 8    // 64*8=512px width (clips edges slightly)
+#define MORPH_PITCH_Y 9    // 32*9=288px height (16px margins)
+
+// Maximum size (uses full height):
+#define MORPH_PITCH_X 7    // 64*7=448px width (16px margins)
+#define MORPH_PITCH_Y 10   // 32*10=320px height (full height)
+```
+
+Remember to update both files after changing these values!
 
 ### Sensor Configuration (Optional)
 The clock supports optional I2C temperature/humidity/pressure sensors connected via the Stemma/JST-PH I2C connector on the ESP32 Touchdown board.
