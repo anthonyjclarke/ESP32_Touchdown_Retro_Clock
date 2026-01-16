@@ -5,6 +5,21 @@ All notable changes to the ESP32 Touchdown LED Matrix Retro Clock project will b
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Firmware version display on startup**: Version number now displayed on TFT screen during boot sequence (appears after build date/time)
+- **Serial debug version output**: Firmware version added to serial console debug header for easier troubleshooting
+
+### Documentation
+- Updated README.md version badge from 2.5.0 to 2.6.0 (2026-01-16)
+- Corrected colon brightness documentation (50% → 75% for Morphing Remix mode)
+- Fixed API `/api/mirror` endpoint specification (2048 bytes → 4096 bytes, RGB565 format)
+- Added startup splash screen feature to README display features
+- Added independent sensor/date color customization to Morphing Remix features
+- Removed outdated "NEW in v2.5.0" label from Morphing Remix mode section
+- Updated CLAUDE.md to mark README version update task as completed
+
 ## [2.6.0] - 2026-01-15
 
 ### Added - Morphing (Remix) Mode Customization

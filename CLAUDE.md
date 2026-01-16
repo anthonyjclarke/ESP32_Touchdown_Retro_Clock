@@ -390,7 +390,6 @@ Features:
 ## Known Issues
 
 ### Documentation
-- ⚠️ README.md version badge shows v2.5.0, should be v2.6.0 (line 4)
 - ⚠️ Manual synchronization required between config.h and app.js for MORPH_PITCH values
   - Critical note exists in config.h lines 70-72
   - Forgetting to sync causes web UI mirror to misalign
@@ -428,7 +427,7 @@ Features:
 ## TODO
 
 ### High Priority
-- [ ] Update README.md version badge to 2.6.0
+- [x] Update README.md version badge to 2.6.0 (completed 2026-01-16)
 - [ ] Add API endpoint to query MORPH_PITCH values (eliminate manual sync)
 - [ ] Change default OTA_PASSWORD to something more secure
 - [ ] Add runtime sensor auto-detection (eliminate compile-time selection)

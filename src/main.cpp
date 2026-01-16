@@ -85,10 +85,13 @@
  * - TFT Display: TFT_eSPI library by Bodmer
  * - Graphics: Adafruit GFX Library by Adafruit
  * - WiFi Management: WiFiManager by tzapu
+ * 
+ * BUGS & ISSUES:
+ * - [ ] Morphing Remix (Mode 3) digits are not Morphing correctly
  *
  * FUTURE ENHANCEMENTS:
  * - [ ] Additional clock modes (Analog, Binary, Word Clock)
- * - [ ] Touch panel support for direct UI interaction
+ * - [ ] Tidy up WebUI design and layout
  * - [ ] Per-LED color control for RGB LED Matrix effects
  * - [ ] Color themes and presets
  * - [ ] MQTT integration for remote control and monitoring
@@ -2884,7 +2887,7 @@ static void drawFrameMorph() {
   const int startX = 5;        // Start with 5px margin on left (shifted left by 1 LED)
   const int startY = 6;        // Start at y=6 (digits span y=7-24, leaving y=25-26 as 2-row gap before date at y=27)
 
-  uint16_t ledColor = cfg.ledColor;
+  uint16_t ledColor = rgb888_to_565(cfg.ledColor);
 
   // Create dimmed color for colons (75% brightness)
   // Extract RGB565 components and dim them
@@ -3487,10 +3490,10 @@ static void showSplashScreen() {
     tft.fillScreen(TFT_BLACK);
     return;
   }
-  delay(600);
 
-  // Phase 5: Show "EMULATOR" below
-  if (splashShowText("EMULATOR", 26, TFT_CYAN)) {
+
+  // Phase 5: Show "CLOCK" below
+  if (splashShowText("CLOCK", 26, TFT_CYAN)) {
     tft.fillScreen(TFT_BLACK);
     return;
   }
@@ -3624,6 +3627,7 @@ void setup() {
   DBGLN(" ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock - DEBUG BOOT");
   DBGLN("========================================");
 
+  DBG("Version: %s\n", FIRMWARE_VERSION);
   DBG("Build: %s %s\n", __DATE__, __TIME__);
   DBG("LED grid: %dx%d (fb size: %u bytes)\n", LED_MATRIX_W, LED_MATRIX_H, (unsigned)sizeof(fb));
   DBG("TFT_eSPI version check...\n");
@@ -3634,6 +3638,11 @@ void setup() {
   char buildInfo[60];
   snprintf(buildInfo, sizeof(buildInfo), "Build: %s %s", __DATE__, __TIME__);
   showStartupStep(buildInfo);
+
+  // Display firmware version
+  char versionInfo[60];
+  snprintf(versionInfo, sizeof(versionInfo), "Version: %s", FIRMWARE_VERSION);
+  showStartupStep(versionInfo);
 
   // Note: ESP32 Touchdown does not have built-in status LEDs
   // WiFi reset can be handled via web interface or serial commands

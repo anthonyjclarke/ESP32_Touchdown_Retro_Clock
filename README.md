@@ -1,7 +1,7 @@
 # ESP32 Touchdown RGB LED Matrix (HUB75) Retro Clock
 
 <!-- Note: Update version badge below when FIRMWARE_VERSION changes in include/config.h -->
-![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)
+![Version](https://img.shields.io/badge/version-2.6.0-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-ESP32%20Touchdown-green.svg)
 ![License](https://img.shields.io/badge/license-MIT-yellow.svg)
 ![LED Type](https://img.shields.io/badge/LED-HUB75%20RGB-red.svg)
@@ -20,26 +20,31 @@ Smooth LED digit morphing animations based on [Morphing Clock](https://github.co
 
 ![Morphing Clock](images/Display1_anim.gif)
 
-### Morphing (Remix) Mode **✨ NEW in v2.5.0**
-Enhanced morphing clock with segment-based animations and bezier curves based on [MorphingClockRemix](https://github.com/lmirel/MorphingClockRemix) by lmirel.
-
-**Features:**
-- **Unified color theming**: All digits use the user-configured LED color from WebUI
-- **Subtle colon dimming**: Colons display at 50% brightness for visual separation
-- **Optimized layout**: Sensor data at top, clock centered, date at bottom with proper spacing
-- **Configurable scaling**: Independent horizontal and vertical pixel pitch control
-- **Full screen usage**: 480×320 TFT display fully utilized with adjustable margins
 
 ### Tetris Animation Mode
 Animated Tetris blocks fall into place to form time digits using [TetrisAnimation](https://github.com/toblum/TetrisAnimation) by Tobias Blum (toblum).
 
-![Tetris Clock](images/tetris_clock_placeholder.gif)
-*Note: Upload your own Tetris clock screenshot/animation here*
+![Tetris Clock](images/Tetris_Clock.jpg)
+
+![Tetris Animation](images/tetris_clock.gif) 
+
+### Morphing (Remix) Mode
+Enhanced morphing clock with segment-based animations and bezier curves based on [MorphingClockRemix](https://github.com/lmirel/MorphingClockRemix) by lmirel.
+
+![Morphing Remix](images/Morphing_Remix.jpg)
 
 ### Mode Selection
 - **Manual Selection**: Choose your preferred clock mode from the web interface
 - **Auto-Cycle**: Enable automatic rotation through all clock modes
 - **Configurable Interval**: Set how long to display each mode (1-60 minutes) before cycling to the next
+
+**Features:**
+- **Unified color theming**: All digits use the user-configured LED color from WebUI
+- **Independent sensor/date colors**: Customizable colors for sensor data and date display (Remix mode)
+- **Subtle colon dimming**: Colons display at 75% brightness for visual separation
+- **Optimized layout**: Sensor data at top, clock centered, date at bottom with proper spacing
+- **Configurable scaling**: Independent horizontal and vertical pixel pitch control
+- **Full screen usage**: 480×320 TFT display fully utilized with adjustable margins
 
 More clock modes coming soon: Analog, Binary, Word Clock, and more!
 
@@ -58,7 +63,7 @@ More clock modes coming soon: Analog, Binary, Word Clock, and more!
 - **Status bar** showing WiFi, IP address, and date
 - **Landscape orientation** optimized for desktop/shelf display
 - **Higher resolution** (480×320 vs 320×240) for crisp display
-- **Startup display**: Visual boot sequence showing initialization progress
+- **Animated startup splash**: Cinematic LED matrix demonstration with RGB sweep, pixel noise, grid size display, and "HUB75 LED MATRIX EMULATOR" text animation (touch to skip)
 
 ### Connectivity
 - **WiFiManager** for easy WiFi setup (AP mode fallback)
@@ -453,7 +458,7 @@ The device provides a simple REST API:
 - `POST /api/reset-wifi` - Reset WiFi credentials and restart device in AP mode
   - Returns: `{"status": "WiFi reset initiated. Device will restart..."}` on success
   - Device will restart and enter WiFi configuration mode
-- `GET /api/mirror` - Raw framebuffer data (2048 bytes, 64×32 matrix, 8-bit intensity values)
+- `GET /api/mirror` - Raw framebuffer data (4096 bytes, 64×32 matrix, RGB565 format: 2 bytes per pixel)
 
 ## OTA Updates
 

@@ -32,6 +32,29 @@ const LED_H = 32;
 const dirtyInputs = new Set();  // Tracks user-modified fields to prevent override
 let timezonesLoaded = false;
 
+const CLOCK_MODE_DETAILS = {
+  0: {
+    name: "Morphing (Classic)",
+    description: "Smooth morphing LED digits inspired by HariFun."
+  },
+  1: {
+    name: "Tetris Animation",
+    description: "Animated falling blocks build the time digits."
+  },
+  2: {
+    name: "Morphing (Remix)",
+    description: "Segment-based morphing with optional date/sensor data."
+  }
+};
+
+function updateClockDescription(mode) {
+  const target = $("clockDescription");
+  if (!target) return;
+  const details = CLOCK_MODE_DETAILS[mode] || { name: "Unknown", description: "" };
+  const description = details.description ? ` - ${details.description}` : "";
+  target.textContent = `Current display: ${details.name}${description}`;
+}
+
 function rgbFromHex(hex) {
   const v = parseInt(hex.replace("#",""), 16);
   return { r: (v>>16)&255, g: (v>>8)&255, b: v&255 };
@@ -200,6 +223,7 @@ async function setControls(state) {
 
   // Clock mode settings
   if (document.activeElement !== $("clockMode")) $("clockMode").value = String(state.clockMode || 0);
+  updateClockDescription(state.clockMode || 0);
   if (document.activeElement !== $("autoRotate")) $("autoRotate").value = String(state.autoRotate || false);
   if (!dirtyInputs.has("rotateInterval")) $("rotateInterval").value = state.rotateInterval || 5;
 
@@ -548,6 +572,7 @@ function renderMirror(buf, state) {
     // Update mode-specific visibility when clock mode changes
     if (id === "clockMode") {
       updateModeVisibility(parseInt(el.value, 10) || 0);
+      updateClockDescription(parseInt(el.value, 10) || 0);
     }
     saveConfig().catch(e => setMsg(String(e), false));
   });
