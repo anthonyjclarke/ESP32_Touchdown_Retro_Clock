@@ -9,7 +9,7 @@
 // -----------------------------
 
 // ===== FIRMWARE VERSION =====
-#define FIRMWARE_VERSION "2.5.0"
+#define FIRMWARE_VERSION "2.6.0"
 
 // ===== LED MATRIX PANEL EMULATION =====
 // Logical LED grid (single 64x32 panel)

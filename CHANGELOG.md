@@ -5,6 +5,39 @@ All notable changes to the ESP32 Touchdown LED Matrix Retro Clock project will b
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-01-15
+
+### Added - Morphing (Remix) Mode Customization
+- **Independent color settings for Morphing (Remix) mode**
+  - Sensor data color picker in WebUI (default: yellow #FFFF00)
+  - Date display color picker in WebUI (default: yellow #FFFF00)
+  - Colors stored in NVS and persist across reboots
+  - Real-time color updates with instant preview
+- **WebUI settings reorganization**
+  - Settings now grouped by clock mode for clarity
+  - "LED Appearance (All Modes)" section for shared settings
+  - "Morphing (Classic) & Tetris Settings" section (LED diameter, gap, morph speed)
+  - "Morphing (Remix) Settings" section (show sensor, show date, colors)
+  - Mode-specific sections show/hide based on selected clock mode
+
+### Fixed
+- **Date truncation in "Mon DD, YYYY" format**
+  - Increased currDate buffer from 11 to 14 characters
+  - "Jan 15, 2026" now displays fully instead of truncating to "Jan 15  20"
+
+### Removed
+- **Fade transition on mode switch**
+  - Display now switches instantly at full brightness
+  - Eliminated the dim-then-brighten effect when changing clock modes
+  - Cleaner, more responsive mode switching experience
+
+### Technical Details
+- New config fields: `morphSensorColor`, `morphDateColor` (uint32_t RGB888)
+- NVS keys: `mSensCol`, `mDateCol` for color persistence
+- API endpoints updated: GET /api/state and POST /api/config support new color fields
+- RGB888 to RGB565 conversion using existing `rgb888_to_565()` function
+- Removed: `fadeLevel`, `inTransition` variables and `applyFade()` function
+
 ## [2.5.0] - 2026-01-14
 
 ### Added - Morphing (Remix) Mode Polish

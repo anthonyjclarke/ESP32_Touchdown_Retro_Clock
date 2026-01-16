@@ -268,6 +268,12 @@ struct AppConfig {
   // Sensor settings
   bool useFahrenheit = false;   // false=Celsius, true=Fahrenheit
 
+  // Morphing (Remix) mode display options
+  bool morphShowSensor = true;  // Show sensor data at top in Morph Remix mode
+  bool morphShowDate = true;    // Show date at bottom in Morph Remix mode
+  uint32_t morphSensorColor = 0xFFFF00;  // Sensor text color (default: yellow)
+  uint32_t morphDateColor = 0xFFFF00;    // Date text color (default: yellow)
+
   // Touch calibration offsets (for fine-tuning touch coordinate mapping)
   int16_t touchOffsetX = 0;     // X offset adjustment (-50 to +50)
   int16_t touchOffsetY = 0;     // Y offset adjustment (-50 to +50)
@@ -452,8 +458,8 @@ static void drawText3x5(const char* text, int x, int y, uint16_t color) {
   }
 }
 
-// Cached date string for status bar
-static char currDate[11] = "----/--/--";
+// Cached date string for status bar (13 chars for "Mon DD, YYYY" format + null)
+static char currDate[14] = "----/--/--";
 
 // Rendering pitch (logical LED -> TFT pixels, computed from TFT size + config)
 static int fbPitch = 2;
@@ -470,8 +476,6 @@ MorphingDigit morphSecondTens, morphSecondUnits;
 unsigned long lastMorphUpdate = 0;  // Last morphing animation update time
 bool clockColon = true;              // Colon blink state
 unsigned long lastColonToggle = 0;   // Last colon toggle time
-uint8_t fadeLevel = 255;             // Current fade level (0-255) for mode transitions
-bool inTransition = false;           // True during mode transition fade
 unsigned long lastTetrisUpdate = 0;  // Last Tetris animation update time
 bool firstRender = true;             // Force initial render after boot
 
@@ -896,6 +900,10 @@ static void loadConfig() {
   cfg.clockMode = (uint8_t)prefs.getUChar("clockMode", DEFAULT_CLOCK_MODE);
   cfg.autoRotate = prefs.getBool("autoRotate", DEFAULT_AUTO_ROTATE);
   cfg.rotateInterval = (uint8_t)prefs.getUChar("rotateInt", DEFAULT_ROTATE_INTERVAL);
+  cfg.morphShowSensor = prefs.getBool("mShowSens", true);
+  cfg.morphShowDate = prefs.getBool("mShowDate", true);
+  cfg.morphSensorColor = prefs.getUInt("mSensCol", 0xFFFF00);  // Default: yellow
+  cfg.morphDateColor = prefs.getUInt("mDateCol", 0xFFFF00);    // Default: yellow
   debugLevel = (uint8_t)prefs.getUChar("dbglvl", DEBUG_LEVEL);
 
   prefs.end();
@@ -930,6 +938,10 @@ static void saveConfig() {
   prefs.putUChar("clockMode", cfg.clockMode);
   prefs.putBool("autoRotate", cfg.autoRotate);
   prefs.putUChar("rotateInt", cfg.rotateInterval);
+  prefs.putBool("mShowSens", cfg.morphShowSensor);
+  prefs.putBool("mShowDate", cfg.morphShowDate);
+  prefs.putUInt("mSensCol", cfg.morphSensorColor);
+  prefs.putUInt("mDateCol", cfg.morphDateColor);
   prefs.putUChar("dbglvl", debugLevel);
   prefs.end();
   DBG_OK("Config saved.");
@@ -1880,6 +1892,12 @@ static void handleGetState() {
   doc["autoRotate"] = cfg.autoRotate;
   doc["rotateInterval"] = cfg.rotateInterval;
 
+  // Morphing (Remix) mode options
+  doc["morphShowSensor"] = cfg.morphShowSensor;
+  doc["morphShowDate"] = cfg.morphShowDate;
+  doc["morphSensorColor"] = cfg.morphSensorColor;
+  doc["morphDateColor"] = cfg.morphDateColor;
+
   // System diagnostics
   uint32_t uptime = millis() / 1000;  // seconds
   doc["uptime"] = uptime;
@@ -2134,9 +2152,10 @@ static void handlePostConfig() {
       // Sync fbPrev with the cleared TFT state (all zeros) for clean comparison
       memset(fbPrev, 0, sizeof(fbPrev));
       resetStatusBar();
-      // Start fade transition for smooth mode switch
-      inTransition = true;
-      fadeLevel = 255;
+      // Reset Tetris clock to force all digits to rebuild with falling blocks
+      if (newClockMode == CLOCK_MODE_TETRIS && tetrisClock) {
+        tetrisClock->reset();
+      }
     }
   }
 
@@ -2161,6 +2180,48 @@ static void handlePostConfig() {
     if (oldRotateInterval != cfg.rotateInterval) {
       DBG_INFO("  [%s] Rotation interval changed: %d -> %d min\n", clientIP.c_str(),
                oldRotateInterval, cfg.rotateInterval);
+    }
+  }
+
+  // Morphing (Remix) mode - Show Sensor
+  if (!doc["morphShowSensor"].isNull()) {
+    bool oldShowSensor = cfg.morphShowSensor;
+    cfg.morphShowSensor = doc["morphShowSensor"].as<bool>();
+    if (oldShowSensor != cfg.morphShowSensor) {
+      DBG_INFO("  [%s] Morph show sensor changed: %s -> %s\n", clientIP.c_str(),
+               oldShowSensor ? "ON" : "OFF",
+               cfg.morphShowSensor ? "ON" : "OFF");
+    }
+  }
+
+  // Morphing (Remix) mode - Show Date
+  if (!doc["morphShowDate"].isNull()) {
+    bool oldShowDate = cfg.morphShowDate;
+    cfg.morphShowDate = doc["morphShowDate"].as<bool>();
+    if (oldShowDate != cfg.morphShowDate) {
+      DBG_INFO("  [%s] Morph show date changed: %s -> %s\n", clientIP.c_str(),
+               oldShowDate ? "ON" : "OFF",
+               cfg.morphShowDate ? "ON" : "OFF");
+    }
+  }
+
+  // Morphing (Remix) mode - Sensor Color
+  if (!doc["morphSensorColor"].isNull()) {
+    uint32_t oldColor = cfg.morphSensorColor;
+    cfg.morphSensorColor = doc["morphSensorColor"].as<uint32_t>();
+    if (oldColor != cfg.morphSensorColor) {
+      DBG_INFO("  [%s] Morph sensor color changed: #%06X -> #%06X\n", clientIP.c_str(),
+               (unsigned)oldColor, (unsigned)cfg.morphSensorColor);
+    }
+  }
+
+  // Morphing (Remix) mode - Date Color
+  if (!doc["morphDateColor"].isNull()) {
+    uint32_t oldColor = cfg.morphDateColor;
+    cfg.morphDateColor = doc["morphDateColor"].as<uint32_t>();
+    if (oldColor != cfg.morphDateColor) {
+      DBG_INFO("  [%s] Morph date color changed: #%06X -> #%06X\n", clientIP.c_str(),
+               (unsigned)oldColor, (unsigned)cfg.morphDateColor);
     }
   }
 
@@ -2567,15 +2628,19 @@ static void drawFrame() {
   drawDigit(0, x0);
   drawDigit(1, x0 + digitW + gap);
 
-  // :
-  drawBitmapSolid(COLON, x0 + 2*digitW + gap, y0, colonW, 255);
+  // : (flashing colon)
+  if (clockColon) {
+    drawBitmapSolid(COLON, x0 + 2*digitW + gap, y0, colonW, 255);
+  }
 
   // MM with gap between digits
   drawDigit(2, x0 + 2*digitW + gap + colonW + gap);
   drawDigit(3, x0 + 3*digitW + 2*gap + colonW + gap);
 
-  // :
-  drawBitmapSolid(COLON, x0 + 4*digitW + 2*gap + colonW + gap, y0, colonW, 255);
+  // : (flashing colon)
+  if (clockColon) {
+    drawBitmapSolid(COLON, x0 + 4*digitW + 2*gap + colonW + gap, y0, colonW, 255);
+  }
 
   // SS with gap between digits
   drawDigit(4, x0 + 4*digitW + 2*gap + 2*colonW + 2*gap);
@@ -2821,14 +2886,14 @@ static void drawFrameMorph() {
 
   uint16_t ledColor = cfg.ledColor;
 
-  // Create dimmed color for colons (50% brightness)
+  // Create dimmed color for colons (75% brightness)
   // Extract RGB565 components and dim them
   uint16_t r = (ledColor >> 11) & 0x1F;
   uint16_t g = (ledColor >> 5) & 0x3F;
   uint16_t b = ledColor & 0x1F;
-  r = r / 2;
-  g = g / 2;
-  b = b / 2;
+  r = (r * 3) / 4;
+  g = (g * 3) / 4;
+  b = (b * 3) / 4;
   uint16_t colonColor = (r << 11) | (g << 5) | b;
 
   // Calculate positions for each digit with proper spacing
@@ -2889,20 +2954,22 @@ static void drawFrameMorph() {
   x += digitWidth + digitGap;
   renderMorphingDigit(&morphSecondUnits, x, startY, ledColor);
 
-  // Add date display at BOTTOM of matrix - always anchored to bottom row
+  // Add date display at BOTTOM of matrix (if enabled)
   // Using y=27 ensures date (5 rows tall) spans y=27-31 within 32-row framebuffer (y=0-31)
   // This leaves y=26 as gap between clock digits and date (1 row gap)
   // Format currDate string (e.g., "12/01/2026" or "2026-01-12")
-  if (currDate[0] != '-') {  // Check if date is valid (not "----/--/--")
+  if (cfg.morphShowDate && currDate[0] != '-') {  // Check if enabled and date is valid
     // Center date horizontally
     int dateWidth = getTextWidth3x5(currDate);
     int dateX = (LED_MATRIX_W - dateWidth) / 2;
-    drawText3x5(currDate, dateX, 27, ledColor);
+    // Use custom date color (RGB888 -> RGB565)
+    uint16_t dateColor = rgb888_to_565(cfg.morphDateColor);
+    drawText3x5(currDate, dateX, 27, dateColor);
   }
 
-  // Add sensor data at TOP of matrix (y=0-4) - always anchored to top
+  // Add sensor data at TOP of matrix (if enabled)
   // Display format based on available sensor data
-  if (sensorAvailable) {
+  if (cfg.morphShowSensor && sensorAvailable) {
     char sensorLine[64];  // Buffer for sensor text
 
     // Convert temperature to display unit
@@ -2934,7 +3001,9 @@ static void drawFrameMorph() {
     // Draw at top of matrix (y=0), centered horizontally like the date
     int sensorWidth = getTextWidth3x5(sensorLine);
     int sensorX = (LED_MATRIX_W - sensorWidth) / 2;
-    drawText3x5(sensorLine, sensorX, 0, ledColor);
+    // Use custom sensor color (RGB888 -> RGB565)
+    uint16_t sensorColor = rgb888_to_565(cfg.morphSensorColor);
+    drawText3x5(sensorLine, sensorX, 0, sensorColor);
   }
 }
 
@@ -2971,19 +3040,9 @@ static void switchClockMode(uint8_t newMode) {
   // Reset status bar
   resetStatusBar();
 
-  // Skip fade transition when switching TO Tetris mode
-  // Tetris will naturally build up the time with falling blocks
-  if (newMode != CLOCK_MODE_TETRIS) {
-    // Start fade transition for other modes
-    inTransition = true;
-    fadeLevel = 255;
-  } else {
-    // Tetris mode: no fade, reset Tetris clock to force all digits to rebuild
-    inTransition = false;
-    fadeLevel = 255;
-    if (tetrisClock) {
-      tetrisClock->reset();  // Force complete rebuild of all digits with falling blocks
-    }
+  // Reset Tetris clock to force all digits to rebuild with falling blocks
+  if (newMode == CLOCK_MODE_TETRIS && tetrisClock) {
+    tetrisClock->reset();
   }
 
   // Save to NVS
@@ -3008,55 +3067,9 @@ static void checkAutoRotation() {
 }
 
 /**
- * Apply fade effect to framebuffer
- * @param level Brightness level (0-255, where 0=black, 255=full brightness)
- */
-static void applyFade(uint8_t level) {
-  if (level == 255) return;  // No fade needed
-
-  for (int y = 0; y < LED_MATRIX_H; y++) {
-    for (int x = 0; x < LED_MATRIX_W; x++) {
-      uint16_t pixel = fb[y][x];
-      if (pixel == 0) continue;  // Skip black pixels
-
-      // Extract RGB565 components
-      uint8_t r = (pixel >> 11) & 0x1F;
-      uint8_t g = (pixel >> 5) & 0x3F;
-      uint8_t b = pixel & 0x1F;
-
-      // Apply fade level
-      r = (r * level) / 255;
-      g = (g * level) / 255;
-      b = (b * level) / 255;
-
-      // Repack to RGB565
-      fb[y][x] = (r << 11) | (g << 5) | b;
-    }
-  }
-}
-
-/**
- * Render the current clock mode with fade transition support
+ * Render the current clock mode
  */
 static void renderCurrentMode() {
-  // Handle fade transition
-  if (inTransition) {
-    // Fade out (255 -> 128)
-    if (fadeLevel > 128) {
-      fadeLevel -= 8;  // Fade out speed
-      if (fadeLevel < 128) fadeLevel = 128;
-    }
-    // Fade in (128 -> 255)
-    else {
-      fadeLevel += 8;  // Fade in speed
-      if (fadeLevel >= 255) {
-        fadeLevel = 255;
-        inTransition = false;
-      }
-    }
-  }
-
-  // Render based on current mode
   switch (cfg.clockMode) {
     case CLOCK_MODE_7SEG:
       drawFrame();
@@ -3074,11 +3087,6 @@ static void renderCurrentMode() {
       drawFrame();  // Fallback to 7-seg
       break;
   }
-
-  // Apply fade if in transition
-  if (inTransition || fadeLevel < 255) {
-    applyFade(fadeLevel);
-  }
 }
 
 /**
@@ -3090,6 +3098,412 @@ static bool modeNeedsAnimation() {
     return tetrisClock->isAnimating();
   }
   return false;
+}
+
+// =========================
+// LED Matrix Splash Screen
+// =========================
+
+// Full TFT display dimensions
+#define SPLASH_TFT_W 480
+#define SPLASH_TFT_H 320
+
+// LED grid for text display (scaled to fill TFT)
+#define SPLASH_LED_SIZE 7      // Size of each LED dot
+#define SPLASH_LED_GAP 1       // Gap between LEDs
+#define SPLASH_PITCH (SPLASH_LED_SIZE + SPLASH_LED_GAP)  // Total pitch per LED
+
+// Check if touch occurred (for skipping splash)
+static bool splashTouchDetected() {
+#if ENABLE_TOUCH
+  return touch.touched();
+#else
+  return false;
+#endif
+}
+
+/**
+ * Draw a single LED dot for splash screen (64x32 grid scaled to TFT)
+ */
+static void drawSplashLED(int gridX, int gridY, uint16_t color) {
+  // Calculate screen position (centered on display)
+  int offsetX = (SPLASH_TFT_W - (64 * SPLASH_PITCH)) / 2;
+  int offsetY = (SPLASH_TFT_H - (32 * SPLASH_PITCH)) / 2;
+  int screenX = offsetX + gridX * SPLASH_PITCH;
+  int screenY = offsetY + gridY * SPLASH_PITCH;
+
+  // Draw rounded LED dot
+  tft.fillRoundRect(screenX, screenY, SPLASH_LED_SIZE, SPLASH_LED_SIZE, 1, color);
+}
+
+/**
+ * Phase 1: RGB Test Pattern - Full screen LED pixel sweeps
+ * Returns true if touch detected (to skip)
+ */
+static bool splashRGBTest() {
+  const uint16_t colors[] = {TFT_RED, TFT_GREEN, TFT_BLUE};
+  const int dotSize = 6;       // Size of each LED dot
+  const int dotGap = 2;        // Gap between dots
+  const int pitch = dotSize + dotGap;  // Total pitch per LED
+  const int cols = SPLASH_TFT_W / pitch;
+  const int rows = SPLASH_TFT_H / pitch;
+
+  for (int c = 0; c < 3; c++) {
+    // Sweep from left to right - draw LED dots 2 columns at a time
+    for (int col = 0; col < cols; col += 2) {
+      if (splashTouchDetected()) return true;
+      for (int cc = 0; cc < 2 && (col + cc) < cols; cc++) {
+        int x = (col + cc) * pitch;
+        for (int row = 0; row < rows; row++) {
+          int y = row * pitch;
+          tft.fillRoundRect(x, y, dotSize, dotSize, 1, colors[c]);
+        }
+      }
+      delay(4);
+    }
+    delay(150);  // Pause at full color
+
+    // Clear sweep from left to right - 2 columns at a time
+    for (int col = 0; col < cols; col += 2) {
+      if (splashTouchDetected()) return true;
+      for (int cc = 0; cc < 2 && (col + cc) < cols; cc++) {
+        int x = (col + cc) * pitch;
+        for (int row = 0; row < rows; row++) {
+          int y = row * pitch;
+          tft.fillRoundRect(x, y, dotSize, dotSize, 1, TFT_BLACK);
+        }
+      }
+      delay(2);
+    }
+    delay(80);  // Pause between colors
+  }
+  return false;
+}
+
+/**
+ * Phase 2: Random pixel noise across full TFT that settles
+ * Returns true if touch detected (to skip)
+ */
+static bool splashPixelNoise() {
+  const uint16_t colors[] = {TFT_RED, TFT_GREEN, TFT_BLUE, TFT_YELLOW, TFT_CYAN, TFT_MAGENTA, TFT_WHITE};
+  const int dotSize = 6;
+
+  // Fill with random colored pixels across full TFT
+  for (int i = 0; i < 800; i++) {
+    if (splashTouchDetected()) return true;
+    int x = random(SPLASH_TFT_W - dotSize);
+    int y = random(SPLASH_TFT_H - dotSize);
+    uint16_t color = colors[random(7)];
+    tft.fillRoundRect(x, y, dotSize, dotSize, 1, color);
+    if (i % 15 == 0) delay(3);
+  }
+  delay(500);  // Pause to see the noise
+
+  // Gradually clear with black dots
+  for (int i = 0; i < 600; i++) {
+    if (splashTouchDetected()) return true;
+    int x = random(SPLASH_TFT_W - dotSize);
+    int y = random(SPLASH_TFT_H - dotSize);
+    tft.fillRoundRect(x, y, dotSize, dotSize, 1, TFT_BLACK);
+    if (i % 15 == 0) delay(3);
+  }
+
+  return false;
+}
+
+/**
+ * 3x5 pixel font data for splash screen text
+ * Each character is 3 pixels wide, 5 pixels tall
+ * Stored as 5 bytes (one per row), LSB = leftmost pixel
+ */
+static const uint8_t splashFont3x5[][5] = {
+  // Space (index 0)
+  {0b000, 0b000, 0b000, 0b000, 0b000},
+  // A-Z (indices 1-26)
+  {0b010, 0b101, 0b111, 0b101, 0b101},  // A
+  {0b110, 0b101, 0b110, 0b101, 0b110},  // B
+  {0b011, 0b100, 0b100, 0b100, 0b011},  // C
+  {0b110, 0b101, 0b101, 0b101, 0b110},  // D
+  {0b111, 0b100, 0b110, 0b100, 0b111},  // E
+  {0b111, 0b100, 0b110, 0b100, 0b100},  // F
+  {0b011, 0b100, 0b101, 0b101, 0b011},  // G
+  {0b101, 0b101, 0b111, 0b101, 0b101},  // H
+  {0b111, 0b010, 0b010, 0b010, 0b111},  // I
+  {0b001, 0b001, 0b001, 0b101, 0b010},  // J
+  {0b101, 0b110, 0b100, 0b110, 0b101},  // K
+  {0b100, 0b100, 0b100, 0b100, 0b111},  // L
+  {0b101, 0b111, 0b111, 0b101, 0b101},  // M
+  {0b101, 0b111, 0b111, 0b111, 0b101},  // N
+  {0b010, 0b101, 0b101, 0b101, 0b010},  // O
+  {0b110, 0b101, 0b110, 0b100, 0b100},  // P
+  {0b010, 0b101, 0b101, 0b110, 0b011},  // Q
+  {0b110, 0b101, 0b110, 0b101, 0b101},  // R
+  {0b011, 0b100, 0b010, 0b001, 0b110},  // S
+  {0b111, 0b010, 0b010, 0b010, 0b010},  // T
+  {0b101, 0b101, 0b101, 0b101, 0b010},  // U
+  {0b101, 0b101, 0b101, 0b010, 0b010},  // V
+  {0b101, 0b101, 0b111, 0b111, 0b101},  // W
+  {0b101, 0b101, 0b010, 0b101, 0b101},  // X
+  {0b101, 0b101, 0b010, 0b010, 0b010},  // Y
+  {0b111, 0b001, 0b010, 0b100, 0b111},  // Z
+  // 0-9 (indices 27-36)
+  {0b010, 0b101, 0b101, 0b101, 0b010},  // 0
+  {0b010, 0b110, 0b010, 0b010, 0b111},  // 1
+  {0b110, 0b001, 0b010, 0b100, 0b111},  // 2
+  {0b110, 0b001, 0b010, 0b001, 0b110},  // 3
+  {0b101, 0b101, 0b111, 0b001, 0b001},  // 4
+  {0b111, 0b100, 0b110, 0b001, 0b110},  // 5
+  {0b011, 0b100, 0b110, 0b101, 0b010},  // 6
+  {0b111, 0b001, 0b010, 0b010, 0b010},  // 7
+  {0b010, 0b101, 0b010, 0b101, 0b010},  // 8
+  {0b010, 0b101, 0b011, 0b001, 0b110},  // 9
+};
+
+/**
+ * Get font index for a character
+ */
+static int getSplashFontIndex(char c) {
+  if (c == ' ') return 0;
+  if (c >= 'A' && c <= 'Z') return c - 'A' + 1;
+  if (c >= 'a' && c <= 'z') return c - 'a' + 1;  // Treat lowercase as uppercase
+  if (c >= '0' && c <= '9') return c - '0' + 27;
+  return 0;  // Default to space
+}
+
+/**
+ * Structure to track pixel positions for animation
+ */
+struct SplashPixel {
+  int8_t x;
+  int8_t y;
+  uint16_t color;
+  int8_t velocityY;  // For falling animation
+  bool active;
+};
+
+#define MAX_SPLASH_PIXELS 512
+static SplashPixel splashPixels[MAX_SPLASH_PIXELS];
+static int splashPixelCount = 0;
+
+/**
+ * Phase 3: Display text pixel-by-pixel
+ * Returns true if touch detected (to skip)
+ */
+static bool splashShowText(const char* text, int startY, uint16_t color) {
+  splashPixelCount = 0;
+
+  // Calculate text width
+  int textLen = strlen(text);
+  int textWidth = textLen * 4 - 1;  // 3px char + 1px gap, minus last gap
+  int startX = (64 - textWidth) / 2;
+
+  // Build pixel list and draw pixel-by-pixel
+  for (int i = 0; i < textLen && splashPixelCount < MAX_SPLASH_PIXELS; i++) {
+    if (splashTouchDetected()) return true;
+
+    int charIndex = getSplashFontIndex(text[i]);
+    int charX = startX + i * 4;
+
+    for (int row = 0; row < 5; row++) {
+      uint8_t rowData = splashFont3x5[charIndex][row];
+      for (int col = 0; col < 3; col++) {
+        if (rowData & (1 << (2 - col))) {  // MSB is leftmost pixel
+          int px = charX + col;
+          int py = startY + row;
+
+          // Store pixel for later animation
+          if (splashPixelCount < MAX_SPLASH_PIXELS) {
+            splashPixels[splashPixelCount].x = px;
+            splashPixels[splashPixelCount].y = py;
+            splashPixels[splashPixelCount].color = color;
+            splashPixels[splashPixelCount].velocityY = 0;
+            splashPixels[splashPixelCount].active = true;
+            splashPixelCount++;
+          }
+
+          // Draw with slight delay for pixel-by-pixel effect
+          drawSplashLED(px, py, color);
+          delay(8);  // Delay per pixel for visible effect
+        }
+      }
+    }
+    delay(80);  // Delay between characters (slowed from 30ms)
+  }
+
+  return false;
+}
+
+/**
+ * Phase 4: Dissolve text - pixels fall off screen
+ * Returns true if touch detected (to skip)
+ */
+static bool splashDissolveText() {
+  // Initially all pixels are stationary (velocityY = 0)
+  for (int i = 0; i < splashPixelCount; i++) {
+    splashPixels[i].velocityY = 0;
+  }
+
+  // Animate until all pixels are off screen
+  bool anyActive = true;
+  int frameCount = 0;
+
+  while (anyActive && frameCount < 150) {  // More frames for slower animation
+    if (splashTouchDetected()) return true;
+
+    anyActive = false;
+
+    // Randomly start some pixels falling (slower rate)
+    for (int i = 0; i < splashPixelCount; i++) {
+      if (splashPixels[i].active && splashPixels[i].velocityY == 0) {
+        if (random(100) < 8) {  // 8% chance to start falling (was 15%)
+          splashPixels[i].velocityY = 1;  // Start slow
+        }
+      }
+    }
+
+    // Update and draw all pixels
+    for (int i = 0; i < splashPixelCount; i++) {
+      if (!splashPixels[i].active) continue;
+
+      // Erase old position
+      drawSplashLED(splashPixels[i].x, splashPixels[i].y, TFT_BLACK);
+
+      // Update position if falling
+      if (splashPixels[i].velocityY > 0) {
+        splashPixels[i].y += splashPixels[i].velocityY;
+
+        // Accelerate more gradually
+        if (frameCount % 5 == 0 && splashPixels[i].velocityY < 3) {
+          splashPixels[i].velocityY++;
+        }
+      }
+
+      // Check if still on screen
+      if (splashPixels[i].y < 32) {
+        // Draw at new position
+        drawSplashLED(splashPixels[i].x, splashPixels[i].y, splashPixels[i].color);
+        anyActive = true;
+      } else {
+        splashPixels[i].active = false;
+      }
+    }
+
+    delay(60);  // Slower frame rate (was 40ms)
+    frameCount++;
+  }
+
+  return false;
+}
+
+/**
+ * Show "64x32" size indicator with corner brackets on full TFT
+ * Returns true if touch detected (to skip)
+ */
+static bool splashShowGridSize() {
+  // Draw corner brackets at TFT corners - animated
+  uint16_t bracketColor = TFT_DARKGREY;
+  const int bracketLen = 40;   // Length of bracket arms in pixels
+  const int bracketThick = 4;  // Thickness of bracket lines
+
+  // Animate corners appearing (draw in steps)
+  for (int i = 0; i <= bracketLen; i += 4) {
+    if (splashTouchDetected()) return true;
+
+    // Top-left corner
+    tft.fillRect(0, 0, i, bracketThick, bracketColor);           // Horizontal
+    tft.fillRect(0, 0, bracketThick, i, bracketColor);           // Vertical
+
+    // Top-right corner
+    tft.fillRect(SPLASH_TFT_W - i, 0, i, bracketThick, bracketColor);
+    tft.fillRect(SPLASH_TFT_W - bracketThick, 0, bracketThick, i, bracketColor);
+
+    // Bottom-left corner
+    tft.fillRect(0, SPLASH_TFT_H - bracketThick, i, bracketThick, bracketColor);
+    tft.fillRect(0, SPLASH_TFT_H - i, bracketThick, i, bracketColor);
+
+    // Bottom-right corner
+    tft.fillRect(SPLASH_TFT_W - i, SPLASH_TFT_H - bracketThick, i, bracketThick, bracketColor);
+    tft.fillRect(SPLASH_TFT_W - bracketThick, SPLASH_TFT_H - i, bracketThick, i, bracketColor);
+
+    delay(25);
+  }
+
+  if (splashTouchDetected()) return true;
+  delay(400);
+
+  // Show "64X32" in center using LED grid
+  if (splashShowText("64X32", 14, TFT_WHITE)) return true;
+  delay(1500);  // Longer pause to read
+
+  return false;
+}
+
+/**
+ * Main splash screen sequence
+ * Runs the full LED matrix demonstration
+ */
+static void showSplashScreen() {
+  tft.fillScreen(TFT_BLACK);
+
+  // Phase 1: RGB color test sweeps
+  if (splashRGBTest()) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+
+  // Phase 2: Random pixel noise
+  if (splashPixelNoise()) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+
+  // Clear for text
+  tft.fillScreen(TFT_BLACK);
+  delay(400);
+
+  // Phase 3: Show grid size with corner brackets
+  if (splashShowGridSize()) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+
+  // Dissolve "64x32"
+  if (splashDissolveText()) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+
+  delay(500);
+  tft.fillScreen(TFT_BLACK);
+  delay(300);
+
+  // Phase 4: Show "HUB75 LED MATRIX" text
+  if (splashShowText("HUB75 LED", 10, TFT_GREEN)) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+  delay(300);
+  if (splashShowText("MATRIX", 18, TFT_GREEN)) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+  delay(600);
+
+  // Phase 5: Show "EMULATOR" below
+  if (splashShowText("EMULATOR", 26, TFT_CYAN)) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+  delay(1200);  // Pause to read the full message
+
+  // Final dissolve - all text falls
+  if (splashDissolveText()) {
+    tft.fillScreen(TFT_BLACK);
+    return;
+  }
+
+  delay(500);
+  tft.fillScreen(TFT_BLACK);
 }
 
 // =========================
@@ -3347,7 +3761,10 @@ void setup() {
 
   // Show "Ready" message (removed empty line to prevent wrap)
   showStartupStatus("READY", "System initialized!");
-  delay(3000);  // Pause to allow reading startup messages before clearing
+  delay(1500);  // Brief pause to see final status
+
+  // Show LED Matrix splash screen animation
+  showSplashScreen();
 
   // Initialize morphing clock digits with current time to avoid morphing from 00:00:00
   // Wait for NTP to sync and get initial time
@@ -3446,11 +3863,6 @@ void loop() {
       needsUpdate = true;
       lastMorphRender = now;
     }
-  }
-
-  // Also update during fade transitions
-  if (inTransition || fadeLevel < 255) {
-    needsUpdate = true;
   }
 
   // Render and display if needed

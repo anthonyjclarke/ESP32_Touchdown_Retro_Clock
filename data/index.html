@@ -58,23 +58,50 @@
           <input id="rotateInterval" type="number" min="1" max="60" value="5">
         </label>
 
-        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">LED Appearance</h3>
+        <h3 style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">LED Appearance (All Modes)</h3>
 
-        <label>LED diameter (px)
-          <input id="ledd" type="number" min="1" max="10">
-        </label>
-        <label>LED gap (px)
-          <input id="ledg" type="number" min="0" max="8">
-        </label>
         <label>LED color
           <input id="col" type="color" value="#ff0000">
         </label>
         <label>Brightness (0-255)
           <input id="bl" type="number" min="0" max="255">
         </label>
-        <label>Morph Speed (1-50x)
+
+        <h3 id="classicTetrisHeader" style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">Morphing (Classic) &amp; Tetris Settings</h3>
+
+        <label id="leddLabel">LED diameter (px)
+          <input id="ledd" type="number" min="1" max="10">
+        </label>
+        <label id="ledgLabel">LED gap (px)
+          <input id="ledg" type="number" min="0" max="8">
+        </label>
+        <label id="morphSpeedLabel">Morph Speed (1-50x)
           <input id="morphSpeed" type="range" min="1" max="50" value="1">
           <span id="morphSpeedVal">1x</span>
+        </label>
+
+        <h3 id="remixHeader" style="margin: 16px 0 8px; font-size: 14px; color: #8ef1ff; border-bottom: 1px solid #1b2330; padding-bottom: 4px;">Morphing (Remix) Settings</h3>
+
+        <label id="morphShowSensorLabel">Show Sensor Data
+          <select id="morphShowSensor">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </label>
+
+        <label id="morphSensorColorLabel">Sensor Color
+          <input id="morphSensorColor" type="color" value="#ffff00">
+        </label>
+
+        <label id="morphShowDateLabel">Show Date
+          <select id="morphShowDate">
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </label>
+
+        <label id="morphDateColorLabel">Date Color
+          <input id="morphDateColor" type="color" value="#ffff00">
         </label>
       </div>
 

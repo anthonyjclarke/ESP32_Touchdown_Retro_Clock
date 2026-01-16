@@ -203,6 +203,51 @@ async function setControls(state) {
   if (document.activeElement !== $("autoRotate")) $("autoRotate").value = String(state.autoRotate || false);
   if (!dirtyInputs.has("rotateInterval")) $("rotateInterval").value = state.rotateInterval || 5;
 
+  // Morphing (Remix) mode settings
+  if (document.activeElement !== $("morphShowSensor")) $("morphShowSensor").value = String(state.morphShowSensor !== false);
+  if (document.activeElement !== $("morphShowDate")) $("morphShowDate").value = String(state.morphShowDate !== false);
+  // Morph sensor/date colors (RGB888 to hex string)
+  if (!dirtyInputs.has("morphSensorColor")) {
+    const sensorCol = state.morphSensorColor || 0xFFFF00;
+    $("morphSensorColor").value = "#" + sensorCol.toString(16).padStart(6, "0");
+  }
+  if (!dirtyInputs.has("morphDateColor")) {
+    const dateCol = state.morphDateColor || 0xFFFF00;
+    $("morphDateColor").value = "#" + dateCol.toString(16).padStart(6, "0");
+  }
+
+  // Update mode-specific section visibility
+  updateModeVisibility(state.clockMode || 0);
+}
+
+// Show/hide settings sections based on selected clock mode
+function updateModeVisibility(mode) {
+  const isRemix = (mode === 2);
+  const isClassicOrTetris = (mode === 0 || mode === 1);
+
+  // Classic & Tetris settings (LED diameter, gap, morph speed)
+  const classicTetrisHeader = $("classicTetrisHeader");
+  const leddLabel = $("leddLabel");
+  const ledgLabel = $("ledgLabel");
+  const morphSpeedLabel = $("morphSpeedLabel");
+
+  // Remix settings (show sensor, show date, colors)
+  const remixHeader = $("remixHeader");
+  const morphShowSensorLabel = $("morphShowSensorLabel");
+  const morphSensorColorLabel = $("morphSensorColorLabel");
+  const morphShowDateLabel = $("morphShowDateLabel");
+  const morphDateColorLabel = $("morphDateColorLabel");
+
+  if (classicTetrisHeader) classicTetrisHeader.style.display = isClassicOrTetris ? "" : "none";
+  if (leddLabel) leddLabel.style.display = isClassicOrTetris ? "" : "none";
+  if (ledgLabel) ledgLabel.style.display = isClassicOrTetris ? "" : "none";
+  if (morphSpeedLabel) morphSpeedLabel.style.display = isClassicOrTetris ? "" : "none";
+
+  if (remixHeader) remixHeader.style.display = isRemix ? "" : "none";
+  if (morphShowSensorLabel) morphShowSensorLabel.style.display = isRemix ? "" : "none";
+  if (morphSensorColorLabel) morphSensorColorLabel.style.display = isRemix ? "" : "none";
+  if (morphShowDateLabel) morphShowDateLabel.style.display = isRemix ? "" : "none";
+  if (morphDateColorLabel) morphDateColorLabel.style.display = isRemix ? "" : "none";
 }
 
 async function fetchMirror() {
@@ -233,12 +278,21 @@ async function saveConfig() {
   const autoRotate = $("autoRotate").value === "true";
   const rotateInterval = parseInt($("rotateInterval").value, 10) || 5;
 
+  // Morphing (Remix) mode settings
+  const morphShowSensor = $("morphShowSensor").value === "true";
+  const morphShowDate = $("morphShowDate").value === "true";
+  // Morph sensor/date colors (hex string to RGB888)
+  const sensorColorRgb = rgbFromHex($("morphSensorColor").value);
+  const morphSensorColor = (sensorColorRgb.r << 16) | (sensorColorRgb.g << 8) | sensorColorRgb.b;
+  const dateColorRgb = rgbFromHex($("morphDateColor").value);
+  const morphDateColor = (dateColorRgb.r << 16) | (dateColorRgb.g << 8) | dateColorRgb.b;
+
   const { r, g, b } = rgbFromHex($("col").value);
   const ledColor = (r<<16) | (g<<8) | b;
 
   const ledDiameter = Number.isFinite(ledDiameterRaw) ? ledDiameterRaw : state.ledDiameter;
   const ledGap = Number.isFinite(ledGapRaw) ? ledGapRaw : state.ledGap;
-  const payload = { tz, ntp, use24h, dateFormat, useFahrenheit, ledDiameter, ledGap, ledColor, brightness, morphSpeed, debugLevel, clockMode, autoRotate, rotateInterval };
+  const payload = { tz, ntp, use24h, dateFormat, useFahrenheit, ledDiameter, ledGap, ledColor, brightness, morphSpeed, debugLevel, clockMode, autoRotate, rotateInterval, morphShowSensor, morphShowDate, morphSensorColor, morphDateColor };
 
   const res = await fetch("/api/config", {
     method: "POST",
@@ -484,17 +538,22 @@ function renderMirror(buf, state) {
 }
 
 // Auto-apply on any config field change (instant feedback)
-["tz", "ntp", "use24h", "dateFormat", "useFahrenheit", "ledd", "ledg", "col", "bl", "morphSpeed", "debugLevel", "clockMode", "autoRotate", "rotateInterval"].forEach((id) => {
+["tz", "ntp", "use24h", "dateFormat", "useFahrenheit", "ledd", "ledg", "col", "bl", "morphSpeed", "debugLevel", "clockMode", "autoRotate", "rotateInterval", "morphShowSensor", "morphShowDate", "morphSensorColor", "morphDateColor"].forEach((id) => {
   const el = $(id);
+  if (!el) return;  // Skip if element doesn't exist
 
   // Immediate save on change for dropdowns and text inputs
   el.addEventListener("change", () => {
     dirtyInputs.add(id);
+    // Update mode-specific visibility when clock mode changes
+    if (id === "clockMode") {
+      updateModeVisibility(parseInt(el.value, 10) || 0);
+    }
     saveConfig().catch(e => setMsg(String(e), false));
   });
 
   // For number/color/range inputs, also apply on input (real-time updates as you drag/type)
-  if (["ledd", "ledg", "col", "bl", "morphSpeed"].includes(id)) {
+  if (["ledd", "ledg", "col", "bl", "morphSpeed", "morphSensorColor", "morphDateColor"].includes(id)) {
     el.addEventListener("input", () => {
       dirtyInputs.add(id);
       // Update morph speed label in real-time
@@ -505,6 +564,9 @@ function renderMirror(buf, state) {
     });
   }
 });
+
+// Initialize visibility on page load (will be called after first state fetch)
+// The tick() function will call setControls() which calls updateModeVisibility()
 
 async function tick() {
   try {
